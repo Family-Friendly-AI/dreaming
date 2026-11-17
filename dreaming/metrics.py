@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from collections import deque
 
 import numpy as np
@@ -64,6 +65,27 @@ class EpisodeTracker:
         return out
 
 
+def git_sha() -> str:
+    """Commit of the running code: `GIT_SHA` (exported by send.sh) or the local checkout, `-dirty` if modified."""
+    if sha := os.environ.get("GIT_SHA"):
+        return sha
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    try:
+        sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, check=True
+        ).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=no"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+    return f"{sha}-dirty" if dirty else sha
+
+
 class RunLogger:
     """Writes `metrics.jsonl` + `progress.csv` in `run_dir`; mirrors to wandb when enabled."""
 
@@ -71,6 +93,7 @@ class RunLogger:
         self, run_dir: str, config: dict, track: bool = False, project: str = "dreaming", name: str | None = None
     ):
         os.makedirs(run_dir, exist_ok=True)
+        config = {**config, "git_sha": git_sha()}
         self.run_dir = run_dir
         self.rows: list[dict] = []
         self._jsonl = open(os.path.join(run_dir, "metrics.jsonl"), "a")
