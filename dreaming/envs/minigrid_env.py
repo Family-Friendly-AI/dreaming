@@ -31,6 +31,10 @@ class MiniGridEnv(EpisodeTrackingEnv):
         u = self.env.unwrapped
         ach = {"success"} if (term and r > 0) else set()
         carrying = None if u.carrying is None else u.carrying.type
-        visit_key = (tuple(int(x) for x in u.agent_pos), int(u.agent_dir), carrying,
-                     zlib.crc32(u.grid.encode().tobytes()))
+        visit_key = (
+            tuple(int(x) for x in u.agent_pos),
+            int(u.agent_dir),
+            carrying,
+            zlib.crc32(u.grid.encode().tobytes()),
+        )
         return obs["image"], r, term or trunc, ach, visit_key

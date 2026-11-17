@@ -26,8 +26,14 @@ def kl_categorical(logp_p: torch.Tensor, logp_q: torch.Tensor) -> torch.Tensor:
     return (logp_p.exp() * (logp_p - logp_q)).sum(-1)
 
 
-def distil(fast: nn.Module, slow_old: nn.Module, obs: np.ndarray, cfg: ConsolidateConfig,
-           device: torch.device, amp: bool = False) -> tuple[nn.Module, dict]:
+def distil(
+    fast: nn.Module,
+    slow_old: nn.Module,
+    obs: np.ndarray,
+    cfg: ConsolidateConfig,
+    device: torch.device,
+    amp: bool = False,
+) -> tuple[nn.Module, dict]:
     cand = copy.deepcopy(slow_old)
     if obs is None or len(obs) == 0 or cfg.distil_epochs == 0:
         return cand, {"distil/kl_fast": float("nan")}
@@ -38,7 +44,7 @@ def distil(fast: nn.Module, slow_old: nn.Module, obs: np.ndarray, cfg: Consolida
     for _ in range(cfg.distil_epochs):
         perm = torch.randperm(n, device=device)
         for s in range(0, n, cfg.minibatch_size):
-            idx = perm[s:s + cfg.minibatch_size]
+            idx = perm[s : s + cfg.minibatch_size]
             with torch.no_grad(), autocast(device, amp):
                 lf, vf, qf = fast(o[idx])
                 lo = slow_old(o[idx])[0]

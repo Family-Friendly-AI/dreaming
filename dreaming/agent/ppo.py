@@ -34,8 +34,9 @@ def compute_gae(rewards, values, dones, next_value, next_done, gamma: float, lam
     return adv, adv + values
 
 
-def q_regression_loss(q_all: torch.Tensor, actions: torch.Tensor, targets: torch.Tensor,
-                      mask: torch.Tensor | None = None) -> torch.Tensor:
+def q_regression_loss(
+    q_all: torch.Tensor, actions: torch.Tensor, targets: torch.Tensor, mask: torch.Tensor | None = None
+) -> torch.Tensor:
     """q_all [B, K, A], actions [B], targets [B], mask [B, K] (bootstrap mask) -> scalar."""
     q_a = q_all.gather(2, actions.view(-1, 1, 1).expand(-1, q_all.shape[1], 1)).squeeze(-1)
     err = (q_a - targets.unsqueeze(1)) ** 2
@@ -44,8 +45,9 @@ def q_regression_loss(q_all: torch.Tensor, actions: torch.Tensor, targets: torch
     return (err * mask).sum() / mask.sum().clamp_min(1.0)
 
 
-def ppo_update(net: nn.Module, opt: torch.optim.Optimizer, batch: dict, cfg: PPOConfig,
-               device: torch.device, amp: bool = False) -> dict:
+def ppo_update(
+    net: nn.Module, opt: torch.optim.Optimizer, batch: dict, cfg: PPOConfig, device: torch.device, amp: bool = False
+) -> dict:
     obs, actions = batch["obs"], batch["actions"]
     old_logp, adv, ret, old_v = batch["logprobs"], batch["advantages"], batch["returns"], batch["values"]
     n = obs.shape[0]
@@ -56,7 +58,7 @@ def ppo_update(net: nn.Module, opt: torch.optim.Optimizer, batch: dict, cfg: PPO
     for _ in range(cfg.update_epochs):
         perm = torch.randperm(n, device=device)
         for s in range(0, n, mb):
-            idx = perm[s:s + mb]
+            idx = perm[s : s + mb]
             with autocast(device, amp):
                 logits, v, q = net(obs[idx])
             dist = Categorical(logits=logits)
@@ -77,7 +79,7 @@ def ppo_update(net: nn.Module, opt: torch.optim.Optimizer, batch: dict, cfg: PPO
             loss.backward()
             nn.utils.clip_grad_norm_(net.parameters(), cfg.max_grad_norm)
             opt.step()
-            for key, val in zip(stats, (pg_loss, v_loss, q_loss, ent, approx_kl, clipfrac)):
+            for key, val in zip(stats, (pg_loss, v_loss, q_loss, ent, approx_kl, clipfrac), strict=True):
                 stats[key].append(val.item())
     with torch.no_grad():
         var_y = ret.var()

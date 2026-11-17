@@ -24,9 +24,16 @@ def awr_weights(adv: torch.Tensor, tau: float, clip: float) -> torch.Tensor:
     return torch.where(adv > 0, w, torch.zeros_like(w))
 
 
-def dream_update(net: nn.Module, opt: torch.optim.Optimizer, trans: dict, roots: dict,
-                 cfg: DreamConfig, device: torch.device, amp: bool = False,
-                 max_grad_norm: float = 0.5) -> dict:
+def dream_update(
+    net: nn.Module,
+    opt: torch.optim.Optimizer,
+    trans: dict,
+    roots: dict,
+    cfg: DreamConfig,
+    device: torch.device,
+    amp: bool = False,
+    max_grad_norm: float = 0.5,
+) -> dict:
     """trans: obs [N,...] uint8, actions [N], returns [N]; roots: obs [R,...], actions [R], adv [R]."""
     t_obs = torch.as_tensor(trans["obs"], device=device)
     t_act = torch.as_tensor(trans["actions"], device=device, dtype=torch.long)
@@ -46,7 +53,7 @@ def dream_update(net: nn.Module, opt: torch.optim.Optimizer, trans: dict, roots:
     for _ in range(cfg.update_epochs):
         perm = torch.randperm(n, device=device)
         for s in range(0, n, cfg.minibatch_size):
-            idx = perm[s:s + cfg.minibatch_size]
+            idx = perm[s : s + cfg.minibatch_size]
             with autocast(device, amp):
                 _, _, q = net(t_obs[idx])
                 logits_r = net(r_obs)[0]

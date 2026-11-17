@@ -11,16 +11,32 @@ from __future__ import annotations
 import zlib
 
 import crafter
-import numpy as np
 
 from dreaming.envs.base import EpisodeTrackingEnv
 
 ACHIEVEMENTS = [
-    "collect_coal", "collect_diamond", "collect_drink", "collect_iron", "collect_sapling",
-    "collect_stone", "collect_wood", "defeat_skeleton", "defeat_zombie", "eat_cow", "eat_plant",
-    "make_iron_pickaxe", "make_iron_sword", "make_stone_pickaxe", "make_stone_sword",
-    "make_wood_pickaxe", "make_wood_sword", "place_furnace", "place_plant", "place_stone",
-    "place_table", "wake_up",
+    "collect_coal",
+    "collect_diamond",
+    "collect_drink",
+    "collect_iron",
+    "collect_sapling",
+    "collect_stone",
+    "collect_wood",
+    "defeat_skeleton",
+    "defeat_zombie",
+    "eat_cow",
+    "eat_plant",
+    "make_iron_pickaxe",
+    "make_iron_sword",
+    "make_stone_pickaxe",
+    "make_stone_sword",
+    "make_wood_pickaxe",
+    "make_wood_sword",
+    "place_furnace",
+    "place_plant",
+    "place_stone",
+    "place_table",
+    "wake_up",
 ]
 
 
@@ -38,9 +54,7 @@ class CrafterEnv(EpisodeTrackingEnv):
 
     def __init__(self, seed: int = 0, max_episode_steps: int | None = None):
         super().__init__()
-        self.env = DeterministicCrafter(
-            area=(64, 64), size=(64, 64), length=max_episode_steps or 10000, seed=seed
-        )
+        self.env = DeterministicCrafter(area=(64, 64), size=(64, 64), length=max_episode_steps or 10000, seed=seed)
 
     def _reset(self, seed):
         if seed is not None:

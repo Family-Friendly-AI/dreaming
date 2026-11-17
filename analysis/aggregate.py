@@ -48,8 +48,9 @@ def on_grid(dfs: list[pd.DataFrame], x: str, metric: str, n_points: int) -> tupl
     return grid, ys
 
 
-def aggregate(runs: dict[str, list[pd.DataFrame]], metric: str, n_points: int = 50, reps: int = 2000,
-              seed: int = 0) -> tuple[pd.DataFrame, pd.DataFrame]:
+def aggregate(
+    runs: dict[str, list[pd.DataFrame]], metric: str, n_points: int = 50, reps: int = 2000, seed: int = 0
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     rows, final = [], []
     for x in X_AXES:
         grids = {m: on_grid(dfs, x, metric, n_points) for m, dfs in runs.items()}
@@ -59,10 +60,28 @@ def aggregate(runs: dict[str, list[pd.DataFrame]], metric: str, n_points: int = 
         point, ci = rly.get_interval_estimates(scores, iqm, reps=reps, random_state=np.random.RandomState(seed))
         for m, (grid, ys) in grids.items():
             for j, xv in enumerate(grid):
-                rows.append({"x_axis": x, "method": m, "x": xv, "iqm": point[m][j],
-                             "ci_low": ci[m][0, j], "ci_high": ci[m][1, j], "n_seeds": ys.shape[0]})
-            final.append({"x_axis": x, "method": m, "x": grid[-1], "iqm": point[m][-1],
-                          "ci_low": ci[m][0, -1], "ci_high": ci[m][1, -1], "n_seeds": ys.shape[0]})
+                rows.append(
+                    {
+                        "x_axis": x,
+                        "method": m,
+                        "x": xv,
+                        "iqm": point[m][j],
+                        "ci_low": ci[m][0, j],
+                        "ci_high": ci[m][1, j],
+                        "n_seeds": ys.shape[0],
+                    }
+                )
+            final.append(
+                {
+                    "x_axis": x,
+                    "method": m,
+                    "x": grid[-1],
+                    "iqm": point[m][-1],
+                    "ci_low": ci[m][0, -1],
+                    "ci_high": ci[m][1, -1],
+                    "n_seeds": ys.shape[0],
+                }
+            )
     return pd.DataFrame(rows), pd.DataFrame(final)
 
 

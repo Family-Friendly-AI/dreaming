@@ -32,23 +32,128 @@ PAPER_SCORES = {
 }
 
 ACH_ORDER = [
-    "collect_coal", "collect_diamond", "collect_drink", "collect_iron", "collect_sapling",
-    "collect_stone", "collect_wood", "defeat_skeleton", "defeat_zombie", "eat_cow", "eat_plant",
-    "make_iron_pickaxe", "make_iron_sword", "make_stone_pickaxe", "make_stone_sword",
-    "make_wood_pickaxe", "make_wood_sword", "place_furnace", "place_plant", "place_stone",
-    "place_table", "wake_up",
+    "collect_coal",
+    "collect_diamond",
+    "collect_drink",
+    "collect_iron",
+    "collect_sapling",
+    "collect_stone",
+    "collect_wood",
+    "defeat_skeleton",
+    "defeat_zombie",
+    "eat_cow",
+    "eat_plant",
+    "make_iron_pickaxe",
+    "make_iron_sword",
+    "make_stone_pickaxe",
+    "make_stone_sword",
+    "make_wood_pickaxe",
+    "make_wood_sword",
+    "place_furnace",
+    "place_plant",
+    "place_stone",
+    "place_table",
+    "wake_up",
 ]
 
 # Appendix A/B success rates (%), in ACH_ORDER.
 PAPER_SUCCESS = {
-    "Rainbow": [0.0, 0.0, 24.0, 0.0, 97.4, 0.2, 74.9, 0.7, 39.6, 26.1, 0.0,
-                0.0, 0.0, 0.0, 0.0, 4.8, 9.8, 0.0, 94.2, 0.0, 52.3, 93.3],
-    "PPO": [0.4, 0.0, 30.3, 0.0, 66.7, 3.0, 83.0, 0.2, 2.0, 12.0, 0.0,
-            0.0, 0.0, 0.0, 0.0, 21.1, 20.1, 0.1, 65.0, 1.7, 66.1, 92.5],
-    "DreamerV2": [14.7, 0.0, 80.0, 0.0, 86.6, 42.7, 92.7, 2.6, 53.1, 17.1, 0.1,
-                  0.0, 0.0, 0.2, 0.3, 59.6, 40.2, 1.8, 84.4, 29.0, 85.7, 92.8],
-    "Random": [0.0, 0.0, 9.3, 0.0, 50.2, 0.0, 24.4, 0.0, 0.1, 0.4, 0.0,
-               0.0, 0.0, 0.0, 0.0, 0.3, 0.3, 0.0, 44.6, 0.0, 4.4, 93.6],
+    "Rainbow": [
+        0.0,
+        0.0,
+        24.0,
+        0.0,
+        97.4,
+        0.2,
+        74.9,
+        0.7,
+        39.6,
+        26.1,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        4.8,
+        9.8,
+        0.0,
+        94.2,
+        0.0,
+        52.3,
+        93.3,
+    ],
+    "PPO": [
+        0.4,
+        0.0,
+        30.3,
+        0.0,
+        66.7,
+        3.0,
+        83.0,
+        0.2,
+        2.0,
+        12.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        21.1,
+        20.1,
+        0.1,
+        65.0,
+        1.7,
+        66.1,
+        92.5,
+    ],
+    "DreamerV2": [
+        14.7,
+        0.0,
+        80.0,
+        0.0,
+        86.6,
+        42.7,
+        92.7,
+        2.6,
+        53.1,
+        17.1,
+        0.1,
+        0.0,
+        0.0,
+        0.2,
+        0.3,
+        59.6,
+        40.2,
+        1.8,
+        84.4,
+        29.0,
+        85.7,
+        92.8,
+    ],
+    "Random": [
+        0.0,
+        0.0,
+        9.3,
+        0.0,
+        50.2,
+        0.0,
+        24.4,
+        0.0,
+        0.1,
+        0.4,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.3,
+        0.3,
+        0.0,
+        44.6,
+        0.0,
+        4.4,
+        93.6,
+    ],
 }
 
 
@@ -72,25 +177,37 @@ def load_summaries(root: str, budget: int = 1_000_000) -> dict[str, list[dict]]:
         if cfg.get("env", {}).get("name") != "crafter":
             continue
         if s.get("budget_axis") != "total" or s.get("budget") != budget:
-            print(f"warning: {name} is not on the paper protocol (budget_axis={s.get('budget_axis')}, "
-                  f"budget={s.get('budget')}); comparison is not like-for-like")
+            print(
+                f"warning: {name} is not on the paper protocol (budget_axis={s.get('budget_axis')}, "
+                f"budget={s.get('budget')}); comparison is not like-for-like"
+            )
         s["_run"] = name
         runs[cfg["method"]].append(s)
     return runs
 
 
 def compare(runs: dict[str, list[dict]]) -> tuple[pd.DataFrame, pd.DataFrame]:
-    rows = [{"method": f"paper: {m}", "score": v[0], "score_std": v[1], "return": v[2],
-             "return_std": v[3], "n_seeds": 10} for m, v in PAPER_SCORES.items()]
+    rows = [
+        {"method": f"paper: {m}", "score": v[0], "score_std": v[1], "return": v[2], "return_std": v[3], "n_seeds": 10}
+        for m, v in PAPER_SCORES.items()
+    ]
     ach = {f"paper: {m}": v for m, v in PAPER_SUCCESS.items()}
     for m, ss in sorted(runs.items()):
         rates = np.array([[s.get(f"achievements/{a}", 0.0) for a in ACH_ORDER] for s in ss])
         scores = np.array([crafter_score(r) for r in rates])
-        rets = np.array([s["final/return_last100k"] for s in ss
-                         if s.get("final/return_last100k") is not None], dtype=float)
-        rows.append({"method": m, "score": scores.mean(), "score_std": scores.std(),
-                     "return": rets.mean() if rets.size else np.nan,
-                     "return_std": rets.std() if rets.size else np.nan, "n_seeds": len(ss)})
+        rets = np.array(
+            [s["final/return_last100k"] for s in ss if s.get("final/return_last100k") is not None], dtype=float
+        )
+        rows.append(
+            {
+                "method": m,
+                "score": scores.mean(),
+                "score_std": scores.std(),
+                "return": rets.mean() if rets.size else np.nan,
+                "return_std": rets.std() if rets.size else np.nan,
+                "n_seeds": len(ss),
+            }
+        )
         ach[m] = rates.mean(0).tolist()
     table = pd.DataFrame(rows).sort_values("score", ascending=False).reset_index(drop=True)
     success = pd.DataFrame(ach, index=pd.Index(ACH_ORDER))

@@ -6,8 +6,16 @@ from dreaming.agent.dream_update import awr_weights, dream_update
 from dreaming.agent.networks import ActorCritic
 from dreaming.config import Config, DreamConfig, apply_method
 from dreaming.envs import EnvPool
-from dreaming.phases.dream import (RolloutSpec, build_specs, discounted_returns, dream_phase, gumbel,
-                                   run_rollouts, score_actions, select_branches)
+from dreaming.phases.dream import (
+    RolloutSpec,
+    build_specs,
+    discounted_returns,
+    dream_phase,
+    gumbel,
+    run_rollouts,
+    score_actions,
+    select_branches,
+)
 from dreaming.phases.snapshots import Snapshot, SnapshotBuffer
 
 ENV = "minigrid:MiniGrid-DoorKey-5x5-v0"
@@ -26,8 +34,14 @@ def setup():
     for t in range(12):
         a = rng.integers(0, 3, size=4)
         nobs, r, d, infos, states = pool.step(a, snapshot_idx=[0, 1, 2, 3])
-        buf.add([Snapshot(states[i], obs[i], nobs[i], float(r[i]), bool(d[i]), t, float(rng.random()),
-                          infos[i]["visit_key"]) for i in range(4)])
+        buf.add(
+            [
+                Snapshot(
+                    states[i], obs[i], nobs[i], float(r[i]), bool(d[i]), t, float(rng.random()), infos[i]["visit_key"]
+                )
+                for i in range(4)
+            ]
+        )
         buf.count_visits(i["visit_key"] for i in infos)
         obs = nobs
     return pool, net, slow, buf
@@ -108,8 +122,7 @@ def test_dream_phase_runs_and_counts_steps(setup):
     cfg.dream.horizon, cfg.dream.update_epochs = 8, 1
     cfg.amp = False
     before = pool.counters["dream"]
-    stats = dream_phase(cfg, pool, net, slow, buf, DEV, wake_steps_this_cycle=2000,
-                        rng=np.random.default_rng(0))
+    stats = dream_phase(cfg, pool, net, slow, buf, DEV, wake_steps_this_cycle=2000, rng=np.random.default_rng(0))
     assert stats["dream/snapshots"] > 0
     assert pool.counters["dream"] - before == stats["dream/env_steps"] > 0
     assert stats["dream/env_steps"] <= 0.3 * 2000 + 1
@@ -133,7 +146,13 @@ def test_awr_increases_prob_of_positive_advantage_action():
     opt = torch.optim.Adam(net.parameters(), lr=1e-3)
     p0 = torch.softmax(net(torch.as_tensor(obs))[0], -1)[:, 4].mean().item()
     cfg = DreamConfig(update_epochs=20, anchor_coef=0.0)
-    dream_update(net, opt, {"obs": obs, "actions": acts, "returns": np.zeros(8, np.float32)},
-                 {"obs": obs, "actions": acts, "adv": adv}, cfg, DEV)
+    dream_update(
+        net,
+        opt,
+        {"obs": obs, "actions": acts, "returns": np.zeros(8, np.float32)},
+        {"obs": obs, "actions": acts, "adv": adv},
+        cfg,
+        DEV,
+    )
     p1 = torch.softmax(net(torch.as_tensor(obs))[0], -1)[:, 4].mean().item()
     assert p1 > p0

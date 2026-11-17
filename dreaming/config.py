@@ -8,15 +8,15 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 Method = Literal[
-    "ppo",            # plain PPO, no cycles
-    "no_dream",       # wake -> distil -> gate -> reset (most important baseline)
-    "random_dream",   # uniform-random rare actions
-    "go_explore",     # snapshot selection by visit counts instead of TD error
-    "full",           # targeted dreams (the method)
-    "surprisal_only", # rarity ablation: -log pi_f only
-    "kl_only",        # rarity ablation: KL(pi_f || pi_s) only
-    "no_gate",        # ablation: always accept
-    "no_bonus",       # ablation: eta = 0
+    "ppo",  # plain PPO, no cycles
+    "no_dream",  # wake -> distil -> gate -> reset (most important baseline)
+    "random_dream",  # uniform-random rare actions
+    "go_explore",  # snapshot selection by visit counts instead of TD error
+    "full",  # targeted dreams (the method)
+    "surprisal_only",  # rarity ablation: -log pi_f only
+    "kl_only",  # rarity ablation: KL(pi_f || pi_s) only
+    "no_gate",  # ablation: always accept
+    "no_bonus",  # ablation: eta = 0
 ]
 
 

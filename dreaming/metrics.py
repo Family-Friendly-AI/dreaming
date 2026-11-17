@@ -67,8 +67,9 @@ class EpisodeTracker:
 class RunLogger:
     """Writes `metrics.jsonl` + `progress.csv` in `run_dir`; mirrors to wandb when enabled."""
 
-    def __init__(self, run_dir: str, config: dict, track: bool = False, project: str = "dreaming",
-                 name: str | None = None):
+    def __init__(
+        self, run_dir: str, config: dict, track: bool = False, project: str = "dreaming", name: str | None = None
+    ):
         os.makedirs(run_dir, exist_ok=True)
         self.run_dir = run_dir
         self.rows: list[dict] = []
@@ -78,6 +79,7 @@ class RunLogger:
         self.wandb = None
         if track:
             import wandb
+
             self.wandb = wandb.init(project=project, name=name, config=config, dir=run_dir)
 
     def log(self, row: dict):
@@ -92,6 +94,7 @@ class RunLogger:
 
     def write_csv(self):
         import pandas as pd
+
         pd.DataFrame(self.rows).to_csv(os.path.join(self.run_dir, "progress.csv"), index=False)
 
     def close(self, summary: dict | None = None):

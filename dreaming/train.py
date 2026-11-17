@@ -40,14 +40,19 @@ def seed_everything(seed: int):
 def env_achievements(name: str) -> list[str] | None:
     if name == "crafter":
         from dreaming.envs.crafter_env import ACHIEVEMENTS
+
         return ACHIEVEMENTS
     return ["success"]
 
 
 def step_row(pool: EnvPool) -> dict:
     c = pool.counters
-    return {"steps/wake": c["wake"], "steps/dream": c["dream"], "steps/gate": c["gate"],
-            "steps/total": c["wake"] + c["dream"] + c["gate"]}
+    return {
+        "steps/wake": c["wake"],
+        "steps/dream": c["dream"],
+        "steps/gate": c["gate"],
+        "steps/total": c["wake"] + c["dream"] + c["gate"],
+    }
 
 
 def train(cfg: Config) -> dict:
@@ -62,11 +67,17 @@ def train(cfg: Config) -> dict:
 
     env_tag = cfg.env.name.split(":")[-1]
     run_name = cfg.run_name or f"{env_tag}_{cfg.method}_s{cfg.seed}_{int(time.time())}"
-    logger = RunLogger(os.path.join(cfg.run_dir, run_name), dataclasses.asdict(cfg), cfg.track,
-                       cfg.wandb_project, run_name)
+    logger = RunLogger(
+        os.path.join(cfg.run_dir, run_name), dataclasses.asdict(cfg), cfg.track, cfg.wandb_project, run_name
+    )
 
-    pool = EnvPool(cfg.env.name, cfg.env.num_envs, seed=cfg.seed,
-                   max_episode_steps=cfg.env.max_episode_steps, mode=cfg.env.pool_mode)
+    pool = EnvPool(
+        cfg.env.name,
+        cfg.env.num_envs,
+        seed=cfg.seed,
+        max_episode_steps=cfg.env.max_episode_steps,
+        mode=cfg.env.pool_mode,
+    )
     fast = ActorCritic(pool.obs_shape, pool.n_actions, cfg.n_q_heads).to(device)
     slow = ActorCritic(pool.obs_shape, pool.n_actions, cfg.n_q_heads).to(device)
     slow.load_state_dict(fast.state_dict())
@@ -74,10 +85,22 @@ def train(cfg: Config) -> dict:
     buffer = SnapshotBuffer(cfg.dream.buffer_size)
     reservoir = ObsReservoir(cfg.consolidate.obs_buffer, seed=cfg.seed)
     tracker = EpisodeTracker(env_achievements(cfg.env.name))
-    ctx = dict(cfg=cfg, pool=pool, fast=fast, slow=slow, opt=new_optimizer(fast, cfg),
-               dream_opt=new_optimizer(fast, cfg, cfg.dream.lr), device=device,
-               buffer=buffer, reservoir=reservoir, tracker=tracker, logger=logger, wake=wake,
-               gate_state=GateState(), rng=np.random.default_rng(cfg.seed + 777))
+    ctx = dict(
+        cfg=cfg,
+        pool=pool,
+        fast=fast,
+        slow=slow,
+        opt=new_optimizer(fast, cfg),
+        dream_opt=new_optimizer(fast, cfg, cfg.dream.lr),
+        device=device,
+        buffer=buffer,
+        reservoir=reservoir,
+        tracker=tracker,
+        logger=logger,
+        wake=wake,
+        gate_state=GateState(),
+        rng=np.random.default_rng(cfg.seed + 777),
+    )
 
     t0 = time.time()
     it = 0
@@ -90,27 +113,40 @@ def train(cfg: Config) -> dict:
         cycle = 0
         while used() < cfg.total_wake_steps and (cfg.budget_axis == "total" or cycle < n_cycles):
             cycle_start = pool.counters["wake"]
-            while (pool.counters["wake"] - cycle_start < cfg.wake_steps_per_cycle
-                   and used() < cfg.total_wake_steps):
-                stats, episodes = wake.iteration(fast, ctx["opt"], buffer if cfg.dream.enabled else None,
-                                                 reservoir if cfg.cycles_enabled else None)
+            while pool.counters["wake"] - cycle_start < cfg.wake_steps_per_cycle and used() < cfg.total_wake_steps:
+                stats, episodes = wake.iteration(
+                    fast, ctx["opt"], buffer if cfg.dream.enabled else None, reservoir if cfg.cycles_enabled else None
+                )
                 tracker.add(episodes, pool.counters["wake"])
                 it += 1
                 if it % cfg.log_every == 0:
-                    row = {**step_row(pool), **stats, **tracker.summary("train"), "cycle": cycle,
-                           "sps": pool.total_steps / (time.time() - t0)}
+                    row = {
+                        **step_row(pool),
+                        **stats,
+                        **tracker.summary("train"),
+                        "cycle": cycle,
+                        "sps": pool.total_steps / (time.time() - t0),
+                    }
                     logger.log(row)
             if cfg.cycles_enabled and used() < cfg.total_wake_steps:
                 cycle_stats = sleep_cycle(ctx, cycle, pool.counters["wake"] - cycle_start)
                 logger.log({**step_row(pool), **cycle_stats, "cycle": cycle})
-            print(f"[cycle {cycle + 1}] {step_row(pool)} "
-                  f"return={tracker.summary().get('train/return', float('nan')):.3f} "
-                  f"sps={pool.total_steps / (time.time() - t0):.0f}", flush=True)
+            print(
+                f"[cycle {cycle + 1}] {step_row(pool)} "
+                f"return={tracker.summary().get('train/return', float('nan')):.3f} "
+                f"sps={pool.total_steps / (time.time() - t0):.0f}",
+                flush=True,
+            )
             cycle += 1
-        summary = {**step_row(pool), **tracker.summary("final"), "budget_axis": cfg.budget_axis,
-                   "budget": cfg.total_wake_steps,
-                   "final/return_last100k": tracker.return_since(pool.counters["wake"] - 100_000),
-                   "unlock_step": tracker.unlock_step, "wall_time_s": time.time() - t0}
+        summary = {
+            **step_row(pool),
+            **tracker.summary("final"),
+            "budget_axis": cfg.budget_axis,
+            "budget": cfg.total_wake_steps,
+            "final/return_last100k": tracker.return_since(pool.counters["wake"] - 100_000),
+            "unlock_step": tracker.unlock_step,
+            "wall_time_s": time.time() - t0,
+        }
     finally:
         pool.close()
     logger.close(summary)
@@ -133,16 +169,25 @@ def sleep_cycle(ctx: dict, cycle: int, wake_steps: int) -> dict:
     stats: dict = {}
 
     if cfg.dream.enabled:
-        stats |= dream_phase(cfg, pool, fast, slow, ctx["buffer"], device, wake_steps, ctx["rng"],
-                             reservoir=ctx["reservoir"], opt=ctx["dream_opt"])
+        stats |= dream_phase(
+            cfg,
+            pool,
+            fast,
+            slow,
+            ctx["buffer"],
+            device,
+            wake_steps,
+            ctx["rng"],
+            reservoir=ctx["reservoir"],
+            opt=ctx["dream_opt"],
+        )
 
     obs = ctx["reservoir"].array() if len(ctx["reservoir"]) else None
     cand, dstats = distil(fast, slow, obs, cfg.consolidate, device, cfg.amp)
     stats |= dstats
 
     if cfg.gate.enabled:
-        accept, gstats = run_gate(pool, cand, slow, ctx["gate_state"], cfg.gate, device, cfg.amp,
-                                  ctx["rng"], cycle)
+        accept, gstats = run_gate(pool, cand, slow, ctx["gate_state"], cfg.gate, device, cfg.amp, ctx["rng"], cycle)
         stats |= gstats
     else:
         accept = True

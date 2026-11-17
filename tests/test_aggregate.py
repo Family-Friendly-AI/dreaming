@@ -14,8 +14,13 @@ def _write_run(root, name, method, slope, seed):
     os.makedirs(d)
     rng = np.random.default_rng(seed)
     wake = np.arange(1, 21) * 1000
-    df = pd.DataFrame({"steps/wake": wake, "steps/total": (wake * 1.5).astype(int),
-                       "train/score": slope * wake / 1000 + rng.normal(0, 0.1, len(wake))})
+    df = pd.DataFrame(
+        {
+            "steps/wake": wake,
+            "steps/total": (wake * 1.5).astype(int),
+            "train/score": slope * wake / 1000 + rng.normal(0, 0.1, len(wake)),
+        }
+    )
     df.to_csv(os.path.join(d, "progress.csv"), index=False)
     with open(os.path.join(d, "config.json"), "w") as f:
         json.dump({"method": method}, f)

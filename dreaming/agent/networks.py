@@ -21,9 +21,14 @@ class MiniGridTrunk(nn.Module):
         super().__init__()
         h, w, c = obs_shape
         self.conv = nn.Sequential(
-            nn.Conv2d(c, 16, 2), nn.ReLU(), nn.MaxPool2d(2),
-            nn.Conv2d(16, 32, 2), nn.ReLU(),
-            nn.Conv2d(32, 64, 2), nn.ReLU(), nn.Flatten(),
+            nn.Conv2d(c, 16, 2),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Conv2d(16, 32, 2),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, 2),
+            nn.ReLU(),
+            nn.Flatten(),
         )
         with torch.no_grad():
             n = self.conv(torch.zeros(1, c, h, w)).shape[1]

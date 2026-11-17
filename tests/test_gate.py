@@ -8,9 +8,9 @@ import torch
 from dreaming.agent.distill import distil
 from dreaming.agent.networks import ActorCritic
 from dreaming.config import Config, ConsolidateConfig, EnvConfig, GateConfig
-from dreaming.train import train
 from dreaming.envs import GATE_SEED_BASE, EnvPool
 from dreaming.phases.gate import GateState, evaluate, gate_decision, gate_seeds, run_gate
+from dreaming.train import train
 
 CFG = GateConfig(eps=0.05, n_boot=2000)
 DEV = torch.device("cpu")
@@ -84,6 +84,7 @@ def test_gate_seed_blocks_are_disjoint():
 def _always_reject_gate(monkeypatch, **kw):
     """The paired test always fails, so only the reject-streak escape can accept."""
     import dreaming.phases.gate as gate_mod
+
     monkeypatch.setattr(gate_mod, "gate_decision", lambda *a, **k: (False, {}))
     torch.manual_seed(0)
     pool = EnvPool("minigrid:MiniGrid-DoorKey-5x5-v0", num_envs=4, seed=0, mode="serial")
@@ -139,9 +140,16 @@ def test_distil_moves_slow_towards_fast():
 
 @pytest.mark.parametrize("mode", ["never", "on_reject", "always"])
 def test_opt_reset_modes(tmp_path, mode):
-    cfg = Config(method="no_dream", total_wake_steps=1024, wake_steps_per_cycle=256, opt_reset=mode,
-                 env=EnvConfig(name="minigrid:MiniGrid-DoorKey-5x5-v0", num_envs=4, pool_mode="serial"),
-                 run_dir=str(tmp_path), run_name="o", device="cpu")
+    cfg = Config(
+        method="no_dream",
+        total_wake_steps=1024,
+        wake_steps_per_cycle=256,
+        opt_reset=mode,
+        env=EnvConfig(name="minigrid:MiniGrid-DoorKey-5x5-v0", num_envs=4, pool_mode="serial"),
+        run_dir=str(tmp_path),
+        run_name="o",
+        device="cpu",
+    )
     cfg.ppo.num_steps = 64
     cfg.gate.n_seeds, cfg.gate.max_steps = 4, 20
     train(cfg)
@@ -156,6 +164,7 @@ def test_opt_reset_modes(tmp_path, mode):
 @pytest.mark.parametrize("reset_fast", [True, False])
 def test_reset_fast_flag(tmp_path, monkeypatch, reset_fast):
     import dreaming.train as train_mod
+
     snaps = {}
     orig_sleep = train_mod.sleep_cycle
 
@@ -167,10 +176,18 @@ def test_reset_fast_flag(tmp_path, monkeypatch, reset_fast):
         out = orig_sleep(ctx, cycle, wake_steps)
         snaps[cycle] = (before, clone(ctx["fast"]), clone(ctx["slow"]))
         return out
+
     monkeypatch.setattr(train_mod, "sleep_cycle", sleep)
-    cfg = Config(method="no_gate", total_wake_steps=512, wake_steps_per_cycle=256, reset_fast=reset_fast,
-                 env=EnvConfig(name="minigrid:MiniGrid-DoorKey-5x5-v0", num_envs=4, pool_mode="serial"),
-                 run_dir=str(tmp_path), run_name="r", device="cpu")
+    cfg = Config(
+        method="no_gate",
+        total_wake_steps=512,
+        wake_steps_per_cycle=256,
+        reset_fast=reset_fast,
+        env=EnvConfig(name="minigrid:MiniGrid-DoorKey-5x5-v0", num_envs=4, pool_mode="serial"),
+        run_dir=str(tmp_path),
+        run_name="r",
+        device="cpu",
+    )
     cfg.ppo.num_steps = 64
     train_mod.train(cfg)
     before, fast_sd, slow_sd = snaps[0]

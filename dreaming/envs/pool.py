@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import multiprocessing as mp
 from collections import defaultdict
-from typing import Sequence
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -21,9 +21,11 @@ GATE_SEED_BASE = 2**30
 def make_env(name: str, seed: int = 0, max_episode_steps: int | None = None):
     if name == "crafter":
         from dreaming.envs.crafter_env import CrafterEnv
+
         return CrafterEnv(seed=seed, max_episode_steps=max_episode_steps)
     if name.startswith("minigrid:"):
         from dreaming.envs.minigrid_env import MiniGridEnv
+
         return MiniGridEnv(name.split(":", 1)[1], seed=seed, max_episode_steps=max_episode_steps)
     raise ValueError(f"unknown env {name!r}")
 
@@ -70,8 +72,9 @@ def _worker_loop(remote, name, seed, idx, max_episode_steps):
 
 
 class EnvPool:
-    def __init__(self, name: str, num_envs: int, seed: int = 0,
-                 max_episode_steps: int | None = None, mode: str = "process"):
+    def __init__(
+        self, name: str, num_envs: int, seed: int = 0, max_episode_steps: int | None = None, mode: str = "process"
+    ):
         self.num_envs = num_envs
         self.mode = mode
         self.counters: dict[str, int] = defaultdict(int)
@@ -82,8 +85,7 @@ class EnvPool:
             self._remotes, self._procs = [], []
             for i in range(num_envs):
                 parent, child = ctx.Pipe()
-                p = ctx.Process(target=_worker_loop, args=(child, name, seed, i, max_episode_steps),
-                                daemon=True)
+                p = ctx.Process(target=_worker_loop, args=(child, name, seed, i, max_episode_steps), daemon=True)
                 p.start()
                 child.close()
                 self._remotes.append(parent)
@@ -96,8 +98,8 @@ class EnvPool:
     # ------------------------------------------------------------------ internals
     def _call(self, idx: Sequence[int], cmd: str, data: Sequence) -> list:
         if self.mode == "serial":
-            return [self._workers[i].handle(cmd, d) for i, d in zip(idx, data)]
-        for i, d in zip(idx, data):
+            return [self._workers[i].handle(cmd, d) for i, d in zip(idx, data, strict=True)]
+        for i, d in zip(idx, data, strict=True):
             self._remotes[i].send((cmd, d))
         return [self._remotes[i].recv() for i in idx]
 
@@ -110,8 +112,14 @@ class EnvPool:
         seeds = [None] * len(idx) if seeds is None else list(seeds)
         return np.stack(self._call(idx, "reset", seeds))
 
-    def step(self, actions, idx: Sequence[int] | None = None, phase: str = "wake",
-             auto_reset: bool = True, snapshot_idx: Sequence[int] | None = None):
+    def step(
+        self,
+        actions,
+        idx: Sequence[int] | None = None,
+        phase: str = "wake",
+        auto_reset: bool = True,
+        snapshot_idx: Sequence[int] | None = None,
+    ):
         """Step envs `idx` with `actions`.
 
         Returns `(obs, rew, done, infos, states)`; `states[j]` is the pickled state *before* the
@@ -119,7 +127,7 @@ class EnvPool:
         """
         idx = self._idx(idx)
         want = set() if snapshot_idx is None else {int(i) for i in snapshot_idx}
-        data = [(int(a), auto_reset, i in want) for i, a in zip(idx, actions)]
+        data = [(int(a), auto_reset, i in want) for i, a in zip(idx, actions, strict=True)]
         out = self._call(idx, "step", data)
         self.counters[phase] += len(idx)
         obs = np.stack([o[0] for o in out])

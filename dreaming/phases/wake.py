@@ -32,8 +32,9 @@ class WakeRunner:
         a = dist.sample()
         return a, dist.log_prob(a), v
 
-    def iteration(self, net, opt, buffer: SnapshotBuffer | None = None,
-                  reservoir: ObsReservoir | None = None) -> tuple[dict, list[dict]]:
+    def iteration(
+        self, net, opt, buffer: SnapshotBuffer | None = None, reservoir: ObsReservoir | None = None
+    ) -> tuple[dict, list[dict]]:
         cfg, pool, dev = self.cfg, self.pool, self.device
         T, N = cfg.ppo.num_steps, pool.num_envs
         actions = torch.zeros((T, N), dtype=torch.long, device=dev)
@@ -86,14 +87,28 @@ class WakeRunner:
                 v_next = nv[i] if t == T - 1 else vals[t + 1, i]
                 d = bool(step_dones[t, i])
                 td = step_rewards[t, i] + cfg.ppo.gamma * v_next * (1 - d) - vals[t, i]
-                snaps.append(Snapshot(state=state, obs=o, next_obs=next_obs_np[t][i], reward=float(step_rewards[t, i]),
-                                      done=d, wake_step=wake_step, td_error=float(abs(td)), visit_key=key))
+                snaps.append(
+                    Snapshot(
+                        state=state,
+                        obs=o,
+                        next_obs=next_obs_np[t][i],
+                        reward=float(step_rewards[t, i]),
+                        done=d,
+                        wake_step=wake_step,
+                        td_error=float(abs(td)),
+                        visit_key=key,
+                    )
+                )
             buffer.add(snaps)
 
         flat = lambda x: x.reshape(-1, *x.shape[2:])  # noqa: E731
         batch = {
-            "obs": flat(self._obs_buf), "actions": flat(actions), "logprobs": flat(logprobs),
-            "advantages": flat(adv), "returns": flat(ret), "values": flat(values),
+            "obs": flat(self._obs_buf),
+            "actions": flat(actions),
+            "logprobs": flat(logprobs),
+            "advantages": flat(adv),
+            "returns": flat(ret),
+            "values": flat(values),
         }
         stats = ppo_update(net, opt, batch, cfg.ppo, dev, cfg.amp)
         stats["wake/td_abs_mean"] = float((ret - values).abs().mean().item())

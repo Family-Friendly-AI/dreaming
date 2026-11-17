@@ -56,8 +56,9 @@ def gumbel(rng: np.random.Generator, shape) -> np.ndarray:
     return -np.log(-np.log(u)).astype(np.float32)
 
 
-def score_actions(logits_f: torch.Tensor, logits_s: torch.Tensor, q: torch.Tensor, prio: torch.Tensor,
-                  cfg: DreamConfig) -> torch.Tensor:
+def score_actions(
+    logits_f: torch.Tensor, logits_s: torch.Tensor, q: torch.Tensor, prio: torch.Tensor, cfg: DreamConfig
+) -> torch.Tensor:
     """P(s, a) = prio(s) * rare(s, a) * (1 + eta * std_k Q_k(s, a)); returns [S, A] (non-negative)."""
     logp_f = F.log_softmax(logits_f, -1)
     logp_s = F.log_softmax(logits_s, -1)
@@ -74,8 +75,9 @@ def score_actions(logits_f: torch.Tensor, logits_s: torch.Tensor, q: torch.Tenso
 
 
 @torch.no_grad()
-def select_branches(buffer: SnapshotBuffer, fast, slow, device, cfg: Config, n: int,
-                    rng: np.random.Generator) -> tuple[list[tuple[int, int, int]], dict]:
+def select_branches(
+    buffer: SnapshotBuffer, fast, slow, device, cfg: Config, n: int, rng: np.random.Generator
+) -> tuple[list[tuple[int, int, int]], dict]:
     """Returns [(snapshot index, rare action, k)] and diagnostics."""
     dc = cfg.dream
     td = buffer.recompute_priorities(fast, device, cfg.ppo.gamma)
@@ -83,8 +85,17 @@ def select_branches(buffer: SnapshotBuffer, fast, slow, device, cfg: Config, n: 
     obs = torch.as_tensor(np.stack([s.obs for s in buffer.items]), device=device)
     logits_f, _, q = fast(obs)
     logits_s = slow(obs)[0]
-    P = score_actions(logits_f.float(), logits_s.float(), q.float(),
-                      torch.as_tensor(state_prio, device=device, dtype=torch.float32), dc).cpu().numpy()
+    P = (
+        score_actions(
+            logits_f.float(),
+            logits_s.float(),
+            q.float(),
+            torch.as_tensor(state_prio, device=device, dtype=torch.float32),
+            dc,
+        )
+        .cpu()
+        .numpy()
+    )
     P = np.nan_to_num(P, nan=0.0, posinf=0.0).clip(min=0.0) + 1e-12
     if dc.selection == "random":
         w_state = td + 1e-8
@@ -105,13 +116,14 @@ def select_branches(buffer: SnapshotBuffer, fast, slow, device, cfg: Config, n: 
 
 
 @torch.no_grad()
-def run_rollouts(pool: EnvPool, net, device, specs: list[RolloutSpec], gamma: float, amp: bool = False,
-                 phase: str = "dream") -> list[Rollout]:
+def run_rollouts(
+    pool: EnvPool, net, device, specs: list[RolloutSpec], gamma: float, amp: bool = False, phase: str = "dream"
+) -> list[Rollout]:
     """Execute rollouts in waves of `pool.num_envs`, each starting from `spec.state`."""
     results: list[Rollout] = []
     N = pool.num_envs
     for w0 in range(0, len(specs), N):
-        wave = specs[w0:w0 + N]
+        wave = specs[w0 : w0 + N]
         idx = list(range(len(wave)))
         obs = pool.set_state(idx, [s.state for s in wave])
         L = max(s.length for s in wave)
@@ -144,15 +156,21 @@ def run_rollouts(pool: EnvPool, net, device, specs: list[RolloutSpec], gamma: fl
                 boot[alive] = net(torch.as_tensor(obs[alive], device=device))[1].float().cpu().numpy()
         for j in range(len(wave)):
             rew = np.array(r_buf[j], dtype=np.float32)
-            ro = Rollout(obs=np.stack(o_buf[j]), actions=np.array(a_buf[j]), rewards=rew,
-                         done=bool(done[j]), bootstrap=float(boot[j]))
+            ro = Rollout(
+                obs=np.stack(o_buf[j]),
+                actions=np.array(a_buf[j]),
+                rewards=rew,
+                done=bool(done[j]),
+                bootstrap=float(boot[j]),
+            )
             ro.returns = discounted_returns(rew, ro.bootstrap, gamma)
             results.append(ro)
     return results
 
 
-def build_specs(buffer: SnapshotBuffer, branches, cfg: DreamConfig, n_actions: int,
-                rng: np.random.Generator) -> list[RolloutSpec]:
+def build_specs(
+    buffer: SnapshotBuffer, branches, cfg: DreamConfig, n_actions: int, rng: np.random.Generator
+) -> list[RolloutSpec]:
     """Order: for each branch, M (branch, control) pairs -> [b0, c0, b1, c1, ...]."""
     specs = []
     for j, a, k in branches:
@@ -165,16 +183,25 @@ def build_specs(buffer: SnapshotBuffer, branches, cfg: DreamConfig, n_actions: i
     return specs
 
 
-def dream_phase(cfg: Config, pool: EnvPool, fast, slow, buffer: SnapshotBuffer, device,
-                wake_steps_this_cycle: int, rng: np.random.Generator,
-                reservoir: ObsReservoir | None = None, opt: torch.optim.Optimizer | None = None) -> dict:
+def dream_phase(
+    cfg: Config,
+    pool: EnvPool,
+    fast,
+    slow,
+    buffer: SnapshotBuffer,
+    device,
+    wake_steps_this_cycle: int,
+    rng: np.random.Generator,
+    reservoir: ObsReservoir | None = None,
+    opt: torch.optim.Optimizer | None = None,
+) -> dict:
     dc = cfg.dream
     cost = 2 * dc.m_rollouts * (dc.k_max + dc.horizon)
     n = int(dc.budget_frac * wake_steps_this_cycle) // cost
     if dc.max_snapshots is not None:
         n = min(n, dc.max_snapshots)
     if len(buffer) == 0 or n == 0:
-        warnings.warn("dream phase skipped: empty snapshot buffer or zero budget")
+        warnings.warn("dream phase skipped: empty snapshot buffer or zero budget", stacklevel=2)
         return {"dream/snapshots": 0}
 
     start = pool.counters["dream"]
@@ -185,7 +212,7 @@ def dream_phase(cfg: Config, pool: EnvPool, fast, slow, buffer: SnapshotBuffer, 
     M = dc.m_rollouts
     adv, root_obs, root_act = [], [], []
     for b, (j, a, _) in enumerate(branches):
-        group = rolls[b * 2 * M:(b + 1) * 2 * M]
+        group = rolls[b * 2 * M : (b + 1) * 2 * M]
         r_branch = np.mean([g.returns[0] for g in group[0::2]])
         r_ctrl = np.mean([g.returns[0] for g in group[1::2]])
         adv.append(r_branch - r_ctrl)
@@ -216,15 +243,17 @@ def dream_phase(cfg: Config, pool: EnvPool, fast, slow, buffer: SnapshotBuffer, 
         reservoir.add(trans["obs"][rng.random(len(trans["obs"])) < 0.1])
 
     stats.update(diag)
-    stats.update({
-        "dream/snapshots": len(branches),
-        "dream/env_steps": pool.counters["dream"] - start,
-        "dream/A_mean": float(adv.mean()),
-        "dream/A_std": float(adv.std()),
-        "dream/A_max": float(adv.max()),
-        "dream/pi_rare_before": float(p_before.mean().item()),
-        "dream/pi_rare_after": float(p_after.mean().item()),
-        "dream/pi_rare_after_posA": float(p_after[pos].mean().item()) if pos.any() else float("nan"),
-        "dream/pi_rare_before_posA": float(p_before[pos].mean().item()) if pos.any() else float("nan"),
-    })
+    stats.update(
+        {
+            "dream/snapshots": len(branches),
+            "dream/env_steps": pool.counters["dream"] - start,
+            "dream/A_mean": float(adv.mean()),
+            "dream/A_std": float(adv.std()),
+            "dream/A_max": float(adv.max()),
+            "dream/pi_rare_before": float(p_before.mean().item()),
+            "dream/pi_rare_after": float(p_after.mean().item()),
+            "dream/pi_rare_after_posA": float(p_after[pos].mean().item()) if pos.any() else float("nan"),
+            "dream/pi_rare_before_posA": float(p_before[pos].mean().item()) if pos.any() else float("nan"),
+        }
+    )
     return stats

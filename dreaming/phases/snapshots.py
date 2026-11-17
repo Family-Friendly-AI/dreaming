@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Hashable
 from dataclasses import dataclass
-from typing import Hashable
 
 import numpy as np
 import torch
@@ -36,7 +36,7 @@ class SnapshotBuffer:
         self.items.extend(snaps)
         if len(self.items) > self.capacity:
             self.items.sort(key=lambda s: s.td_error, reverse=True)
-            del self.items[self.capacity:]
+            del self.items[self.capacity :]
 
     def count_visits(self, keys):
         self.visits.update(keys)
@@ -48,7 +48,7 @@ class SnapshotBuffer:
             return np.zeros(0)
         out = []
         for s in range(0, len(self.items), batch_size):
-            chunk = self.items[s:s + batch_size]
+            chunk = self.items[s : s + batch_size]
             obs = torch.as_tensor(np.stack([c.obs for c in chunk]), device=device)
             nxt = torch.as_tensor(np.stack([c.next_obs for c in chunk]), device=device)
             r = torch.tensor([c.reward for c in chunk], device=device)
@@ -57,7 +57,7 @@ class SnapshotBuffer:
             v2 = net(nxt)[1]
             out.append((r + gamma * v2 * (1 - d) - v).abs().cpu().numpy())
         prio = np.concatenate(out)
-        for c, p in zip(self.items, prio):
+        for c, p in zip(self.items, prio, strict=True):
             c.td_error = float(p)
         return prio
 
