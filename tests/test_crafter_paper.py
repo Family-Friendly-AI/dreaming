@@ -3,9 +3,7 @@ import json
 import pytest
 
 from analysis.crafter_paper import PAPER_SCORES, PAPER_SUCCESS, compare, crafter_score, load_summaries
-from dreaming.config import Config, EnvConfig
 from dreaming.metrics import EpisodeTracker
-from dreaming.train import train
 
 
 @pytest.mark.parametrize("method", list(PAPER_SUCCESS))
@@ -23,27 +21,6 @@ def test_return_since():
     assert t.return_since(15) == 3.0
     assert t.return_since(0) == 2.0
     assert t.return_since(30) is None
-
-
-def test_total_budget_stops_training(tmp_path):
-    cfg = Config(
-        method="full",
-        total_wake_steps=6000,
-        budget_axis="total",
-        wake_steps_per_cycle=2000,
-        env=EnvConfig(name="minigrid:MiniGrid-DoorKey-5x5-v0", num_envs=4, pool_mode="serial"),
-        run_dir=str(tmp_path),
-        run_name="b",
-        device="cpu",
-    )
-    cfg.ppo.num_steps = 64
-    cfg.gate.n_seeds = 4
-    s = train(cfg)
-    assert s["steps/dream"] + s["steps/gate"] > 0
-    # Wake stops as soon as the total budget is reached (overshoot <= one rollout or sleep phase).
-    assert s["steps/wake"] < 6000
-    assert s["steps/total"] >= 6000
-    assert s["budget_axis"] == "total"
 
 
 def test_compare_includes_paper_and_runs(tmp_path):

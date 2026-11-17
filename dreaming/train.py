@@ -1,4 +1,4 @@
-"""Entry point: `python -m dreaming.train --method full --env.name crafter ...`.
+"""Entry point: `python -m dreaming.train --method ppo ...` on Craftax-Classic-Symbolic.
 
 Cycle: wake -> dream -> consolidate -> gate -> reset (method `ppo` runs wake only).
 """
@@ -7,210 +7,128 @@ from __future__ import annotations
 
 import dataclasses
 import os
-import random
 import time
 
+import jax
+import jax.numpy as jnp
 import numpy as np
-import torch
 import tyro
 
-from dreaming.agent.distill import distil
-from dreaming.agent.networks import ActorCritic
+from dreaming.agent.networks import ActorCritic, apply_fn, init_params
+from dreaming.agent.ppo import make_optimizer
 from dreaming.config import Config, apply_method
-from dreaming.envs import EnvPool
+from dreaming.envs import craftax as E
 from dreaming.metrics import EpisodeTracker, RunLogger
-from dreaming.phases.dream import dream_phase
-from dreaming.phases.gate import GateState, run_gate
-from dreaming.phases.snapshots import ObsReservoir, SnapshotBuffer
-from dreaming.phases.wake import WakeRunner
+from dreaming.phases.wake import Episodes, init_wake, make_wake_iteration
+from dreaming.state import StepCounters, TrainState
 
 
-def resolve_device(name: str) -> torch.device:
+def resolve_device(name: str):
     if name == "auto":
-        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    return torch.device(name)
+        return jax.devices()[0]
+    try:
+        return jax.devices(name)[0]
+    except RuntimeError as e:
+        raise RuntimeError(
+            f"--device {name} requested but JAX sees only {jax.devices()}. On Snellius run `uv sync` on Linux so "
+            "jax[cuda12] is installed (and drop `module load CUDA` if it shadows the pip CUDA wheels), "
+            "or pass --device cpu."
+        ) from e
 
 
-def seed_everything(seed: int):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-
-
-def env_achievements(name: str) -> list[str] | None:
-    if name == "crafter":
-        from dreaming.envs.crafter_env import ACHIEVEMENTS
-
-        return ACHIEVEMENTS
-    return ["success"]
-
-
-def step_row(pool: EnvPool) -> dict:
-    c = pool.counters
-    return {
-        "steps/wake": c["wake"],
-        "steps/dream": c["dream"],
-        "steps/gate": c["gate"],
-        "steps/total": c["wake"] + c["dream"] + c["gate"],
-    }
+def episode_records(ep: Episodes) -> list[dict]:
+    done = np.asarray(ep.done)
+    if not done.any():
+        return []
+    t_idx, n_idx = np.nonzero(done)
+    order = np.lexsort((n_idx, t_idx))
+    ret, length, ach = np.asarray(ep.ret), np.asarray(ep.length), np.asarray(ep.achievements)
+    return [
+        {
+            "r": float(ret[t, n]),
+            "l": int(length[t, n]),
+            "achievements": [a for a, hit in zip(E.ACHIEVEMENTS, ach[t, n], strict=True) if hit],
+        }
+        for t, n in zip(t_idx[order], n_idx[order], strict=True)
+    ]
 
 
 def train(cfg: Config) -> dict:
     cfg = apply_method(cfg)
-    seed_everything(cfg.seed)
     device = resolve_device(cfg.device)
-    if device.type == "cuda":
-        torch.backends.cudnn.benchmark = True
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-    torch.set_num_threads(max(1, min(4, os.cpu_count() or 1)))
+    with jax.default_device(device):
+        return _train(cfg, device.platform)
 
-    env_tag = cfg.env.name.split(":")[-1]
-    run_name = cfg.run_name or f"{env_tag}_{cfg.method}_s{cfg.seed}_{int(time.time())}"
+
+def _train(cfg: Config, platform: str) -> dict:
+    run_name = cfg.run_name or f"craftax_{cfg.method}_s{cfg.seed}_{int(time.time())}"
     logger = RunLogger(
         os.path.join(cfg.run_dir, run_name), dataclasses.asdict(cfg), cfg.track, cfg.wandb_project, run_name
     )
+    print(f"platform={platform} devices={jax.devices()}", flush=True)
 
-    pool = EnvPool(
-        cfg.env.name,
-        cfg.env.num_envs,
-        seed=cfg.seed,
-        max_episode_steps=cfg.env.max_episode_steps,
-        mode=cfg.env.pool_mode,
-    )
-    fast = ActorCritic(pool.obs_shape, pool.n_actions, cfg.n_q_heads).to(device)
-    slow = ActorCritic(pool.obs_shape, pool.n_actions, cfg.n_q_heads).to(device)
-    slow.load_state_dict(fast.state_dict())
-    wake = WakeRunner(cfg, pool, device, seed=cfg.seed)
-    buffer = SnapshotBuffer(cfg.dream.buffer_size)
-    reservoir = ObsReservoir(cfg.consolidate.obs_buffer, seed=cfg.seed)
-    tracker = EpisodeTracker(env_achievements(cfg.env.name))
-    ctx = dict(
-        cfg=cfg,
-        pool=pool,
+    env_params = E.env_params(cfg.env.max_episode_steps)
+    compute_dtype = jnp.bfloat16 if cfg.amp and platform == "gpu" else jnp.float32
+    net = ActorCritic(E.NUM_ACTIONS, cfg.n_q_heads, compute_dtype=compute_dtype)
+    tx = make_optimizer(cfg.ppo.lr, cfg.ppo.max_grad_norm)
+    root = jax.random.key(cfg.seed)
+    fast = init_params(net, E.stream(root, E.KeyStream.INIT), E.OBS_DIM)
+    wake_key = E.stream(root, E.KeyStream.WAKE)
+    k_env, wake_key = jax.random.split(wake_key)
+    ts = TrainState(
         fast=fast,
-        slow=slow,
-        opt=new_optimizer(fast, cfg),
-        dream_opt=new_optimizer(fast, cfg, cfg.dream.lr),
-        device=device,
-        buffer=buffer,
-        reservoir=reservoir,
-        tracker=tracker,
-        logger=logger,
-        wake=wake,
-        gate_state=GateState(),
-        rng=np.random.default_rng(cfg.seed + 777),
+        opt=tx.init(fast),
+        wake=init_wake(k_env, cfg.env.num_envs, env_params),
+        key=wake_key,
+        counters=StepCounters(),
     )
+    wake_iteration = make_wake_iteration(cfg, apply_fn(net), tx, env_params)
+    tracker = EpisodeTracker(list(E.ACHIEVEMENTS))
+    steps_per_iter = cfg.ppo.num_steps * cfg.env.num_envs
+
+    def used() -> int:
+        return ts.counters.total if cfg.budget_axis == "total" else ts.counters.wake
 
     t0 = time.time()
     it = 0
     n_cycles = max(1, cfg.total_wake_steps // cfg.wake_steps_per_cycle)
-
-    def used() -> int:
-        return pool.total_steps if cfg.budget_axis == "total" else pool.counters["wake"]
-
-    try:
-        cycle = 0
-        while used() < cfg.total_wake_steps and (cfg.budget_axis == "total" or cycle < n_cycles):
-            cycle_start = pool.counters["wake"]
-            while pool.counters["wake"] - cycle_start < cfg.wake_steps_per_cycle and used() < cfg.total_wake_steps:
-                stats, episodes = wake.iteration(
-                    fast, ctx["opt"], buffer if cfg.dream.enabled else None, reservoir if cfg.cycles_enabled else None
-                )
-                tracker.add(episodes, pool.counters["wake"])
-                it += 1
-                if it % cfg.log_every == 0:
-                    row = {
-                        **step_row(pool),
-                        **stats,
-                        **tracker.summary("train"),
-                        "cycle": cycle,
-                        "sps": pool.total_steps / (time.time() - t0),
-                    }
-                    logger.log(row)
-            if cfg.cycles_enabled and used() < cfg.total_wake_steps:
-                cycle_stats = sleep_cycle(ctx, cycle, pool.counters["wake"] - cycle_start)
-                logger.log({**step_row(pool), **cycle_stats, "cycle": cycle})
-            print(
-                f"[cycle {cycle + 1}] {step_row(pool)} "
-                f"return={tracker.summary().get('train/return', float('nan')):.3f} "
-                f"sps={pool.total_steps / (time.time() - t0):.0f}",
-                flush=True,
-            )
-            cycle += 1
-        summary = {
-            **step_row(pool),
-            **tracker.summary("final"),
-            "budget_axis": cfg.budget_axis,
-            "budget": cfg.total_wake_steps,
-            "final/return_last100k": tracker.return_since(pool.counters["wake"] - 100_000),
-            "unlock_step": tracker.unlock_step,
-            "wall_time_s": time.time() - t0,
-        }
-    finally:
-        pool.close()
+    cycle = 0
+    while used() < cfg.total_wake_steps and (cfg.budget_axis == "total" or cycle < n_cycles):
+        cycle_start = ts.counters.wake
+        while ts.counters.wake - cycle_start < cfg.wake_steps_per_cycle and used() < cfg.total_wake_steps:
+            ts.key, k = jax.random.split(ts.key)
+            ts.fast, ts.opt, ts.wake, out = wake_iteration(ts.fast, ts.opt, ts.wake, k)
+            ts.counters.wake += steps_per_iter
+            tracker.add(episode_records(out.episodes), ts.counters.wake)
+            it += 1
+            if it % cfg.log_every == 0:
+                row = {
+                    **ts.counters.row(),
+                    **{k: float(v) for k, v in out.stats.items()},
+                    **tracker.summary("train"),
+                    "cycle": cycle,
+                    "sps": ts.counters.total / (time.time() - t0),
+                }
+                logger.log(row)
+        print(
+            f"[cycle {cycle + 1}] {ts.counters.row()} "
+            f"return={tracker.summary().get('train/return', float('nan')):.3f} "
+            f"sps={ts.counters.total / (time.time() - t0):.0f}",
+            flush=True,
+        )
+        cycle += 1
+    summary = {
+        **ts.counters.row(),
+        **tracker.summary("final"),
+        "budget_axis": cfg.budget_axis,
+        "budget": cfg.total_wake_steps,
+        "final/return_last100k": tracker.return_since(ts.counters.wake - 100_000),
+        "unlock_step": tracker.unlock_step,
+        "wall_time_s": time.time() - t0,
+        "sps": ts.counters.total / (time.time() - t0),
+    }
     logger.close(summary)
     return summary
-
-
-def new_optimizer(net: torch.nn.Module, cfg: Config, lr: float | None = None) -> torch.optim.Optimizer:
-    return torch.optim.Adam(net.parameters(), lr=cfg.ppo.lr if lr is None else lr, eps=1e-5)
-
-
-def sleep_cycle(ctx: dict, cycle: int, wake_steps: int) -> dict:
-    """dream -> consolidate -> gate -> reset.
-
-    Dream and gate reuse the wake workers, so in-progress wake episodes are saved and restored around
-    the sleep phase (wake continues exactly where it stopped).
-    """
-    cfg, pool, fast, slow, device = ctx["cfg"], ctx["pool"], ctx["fast"], ctx["slow"], ctx["device"]
-    t0 = time.time()
-    wake_states = pool.get_state(None)
-    stats: dict = {}
-
-    if cfg.dream.enabled:
-        stats |= dream_phase(
-            cfg,
-            pool,
-            fast,
-            slow,
-            ctx["buffer"],
-            device,
-            wake_steps,
-            ctx["rng"],
-            reservoir=ctx["reservoir"],
-            opt=ctx["dream_opt"],
-        )
-
-    obs = ctx["reservoir"].array() if len(ctx["reservoir"]) else None
-    cand, dstats = distil(fast, slow, obs, cfg.consolidate, device, cfg.amp)
-    stats |= dstats
-
-    if cfg.gate.enabled:
-        accept, gstats = run_gate(pool, cand, slow, ctx["gate_state"], cfg.gate, device, cfg.amp, ctx["rng"], cycle)
-        stats |= gstats
-    else:
-        accept = True
-        stats["gate/accepted"] = 1.0
-
-    # Reset: pi_f := pi_s (accepted candidate, or the old slow policy -> true rollback).
-    # load_state_dict copies in place, so the optimizers keep pointing at fast's parameters.
-    if accept:
-        slow.load_state_dict(cand.state_dict())
-    if cfg.reset_fast:
-        fast.load_state_dict(slow.state_dict())
-    stats["reset/fast"] = float(cfg.reset_fast)
-    reset_opt = cfg.opt_reset == "always" or (cfg.opt_reset == "on_reject" and not accept)
-    if reset_opt:
-        ctx["opt"] = new_optimizer(fast, cfg)
-        ctx["dream_opt"] = new_optimizer(fast, cfg, cfg.dream.lr)
-    stats["opt/reset"] = float(reset_opt)
-    ctx["reservoir"].clear()
-
-    obs = pool.set_state(None, wake_states)
-    ctx["wake"].obs = obs
-    stats["sleep/wall_s"] = time.time() - t0
-    return stats
 
 
 def main():

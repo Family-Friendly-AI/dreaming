@@ -2,88 +2,105 @@
 
 from __future__ import annotations
 
-import contextlib
+import jax
+import jax.numpy as jnp
+import optax
+from flax import struct
+from jax import Array
 
-import numpy as np
-import torch
-import torch.nn as nn
-from torch.distributions import Categorical
-
+from dreaming.agent.networks import ApplyFn, Params, entropy, log_softmax, take
 from dreaming.config import PPOConfig
 
 
-def autocast(device: torch.device, enabled: bool):
-    if enabled and device.type == "cuda":
-        return torch.autocast("cuda", dtype=torch.bfloat16)
-    return contextlib.nullcontext()
+def make_optimizer(lr: float, max_grad_norm: float) -> optax.GradientTransformation:
+    return optax.chain(optax.clip_by_global_norm(max_grad_norm), optax.adam(lr, eps=1e-5))
 
 
-def compute_gae(rewards, values, dones, next_value, next_done, gamma: float, lam: float):
-    """Tensors shaped [T, N]; `dones[t]` marks that obs t is the first of a new episode (CleanRL)."""
-    T = rewards.shape[0]
-    adv = torch.zeros_like(rewards)
-    last = torch.zeros_like(next_value)
-    for t in reversed(range(T)):
-        if t == T - 1:
-            nonterminal, nextv = 1.0 - next_done, next_value
-        else:
-            nonterminal, nextv = 1.0 - dones[t + 1], values[t + 1]
-        delta = rewards[t] + gamma * nextv * nonterminal - values[t]
+def compute_gae(
+    rewards: Array, values: Array, dones: Array, next_value: Array, next_done: Array, gamma: float, lam: float
+) -> tuple[Array, Array]:
+    """Arrays shaped [T, N]; `dones[t]` marks that obs t is the first of a new episode (CleanRL)."""
+    next_nonterminal = 1.0 - jnp.concatenate([dones[1:], next_done[None]], axis=0).astype(jnp.float32)
+    next_values = jnp.concatenate([values[1:], next_value[None]], axis=0)
+    deltas = rewards + gamma * next_values * next_nonterminal - values
+
+    def body(last, x):
+        delta, nonterminal = x
         last = delta + gamma * lam * nonterminal * last
-        adv[t] = last
+        return last, last
+
+    _, adv = jax.lax.scan(body, jnp.zeros_like(next_value), (deltas, next_nonterminal), reverse=True)
     return adv, adv + values
 
 
-def q_regression_loss(
-    q_all: torch.Tensor, actions: torch.Tensor, targets: torch.Tensor, mask: torch.Tensor | None = None
-) -> torch.Tensor:
+def q_regression_loss(q_all: Array, actions: Array, targets: Array, mask: Array | None = None) -> Array:
     """q_all [B, K, A], actions [B], targets [B], mask [B, K] (bootstrap mask) -> scalar."""
-    q_a = q_all.gather(2, actions.view(-1, 1, 1).expand(-1, q_all.shape[1], 1)).squeeze(-1)
-    err = (q_a - targets.unsqueeze(1)) ** 2
+    q_a = take(q_all, jnp.broadcast_to(actions[:, None], q_all.shape[:2]))
+    err = (q_a - targets[:, None]) ** 2
     if mask is None:
         return err.mean()
-    return (err * mask).sum() / mask.sum().clamp_min(1.0)
+    return (err * mask).sum() / jnp.maximum(mask.sum(), 1.0)
+
+
+class PPOBatch(struct.PyTreeNode):
+    obs: Array
+    actions: Array
+    logprobs: Array
+    advantages: Array
+    returns: Array
+    values: Array
 
 
 def ppo_update(
-    net: nn.Module, opt: torch.optim.Optimizer, batch: dict, cfg: PPOConfig, device: torch.device, amp: bool = False
-) -> dict:
-    obs, actions = batch["obs"], batch["actions"]
-    old_logp, adv, ret, old_v = batch["logprobs"], batch["advantages"], batch["returns"], batch["values"]
-    n = obs.shape[0]
-    mb = max(1, n // cfg.num_minibatches)
-    k = net.n_q_heads
-    q_mask = (torch.rand(n, k, device=device) < cfg.q_bootstrap_p).float()
-    stats = {"pg_loss": [], "v_loss": [], "q_loss": [], "entropy": [], "approx_kl": [], "clipfrac": []}
-    for _ in range(cfg.update_epochs):
-        perm = torch.randperm(n, device=device)
-        for s in range(0, n, mb):
-            idx = perm[s : s + mb]
-            with autocast(device, amp):
-                logits, v, q = net(obs[idx])
-            dist = Categorical(logits=logits)
-            logp = dist.log_prob(actions[idx])
-            ratio = (logp - old_logp[idx]).exp()
-            with torch.no_grad():
-                approx_kl = ((ratio - 1) - (logp - old_logp[idx])).mean()
-                clipfrac = ((ratio - 1).abs() > cfg.clip_coef).float().mean()
-            a = adv[idx]
-            a = (a - a.mean()) / (a.std() + 1e-8)
-            pg_loss = torch.max(-a * ratio, -a * ratio.clamp(1 - cfg.clip_coef, 1 + cfg.clip_coef)).mean()
-            v_clipped = old_v[idx] + (v - old_v[idx]).clamp(-cfg.clip_coef, cfg.clip_coef)
-            v_loss = 0.5 * torch.max((v - ret[idx]) ** 2, (v_clipped - ret[idx]) ** 2).mean()
-            q_loss = q_regression_loss(q, actions[idx], ret[idx], q_mask[idx])
-            ent = dist.entropy().mean()
-            loss = pg_loss - cfg.ent_coef * ent + cfg.vf_coef * v_loss + cfg.q_coef * q_loss
-            opt.zero_grad(set_to_none=True)
-            loss.backward()
-            nn.utils.clip_grad_norm_(net.parameters(), cfg.max_grad_norm)
-            opt.step()
-            for key, val in zip(stats, (pg_loss, v_loss, q_loss, ent, approx_kl, clipfrac), strict=True):
-                stats[key].append(val.item())
-    with torch.no_grad():
-        var_y = ret.var()
-        ev = (1 - (ret - old_v).var() / var_y).item() if var_y > 0 else float("nan")
-    out = {f"ppo/{k}": float(np.mean(v)) for k, v in stats.items()}
-    out["ppo/explained_variance"] = ev
-    return out
+    apply_fn: ApplyFn,
+    tx: optax.GradientTransformation,
+    params: Params,
+    opt_state: optax.OptState,
+    batch: PPOBatch,
+    key: Array,
+    cfg: PPOConfig,
+    n_q_heads: int,
+) -> tuple[Params, optax.OptState, dict[str, Array]]:
+    n = batch.obs.shape[0]
+    n_mb = max(1, cfg.num_minibatches)
+    mb = n // n_mb
+    k_mask, k_perm = jax.random.split(key)
+    q_mask = (jax.random.uniform(k_mask, (n, n_q_heads)) < cfg.q_bootstrap_p).astype(jnp.float32)
+
+    def loss_fn(p, b: PPOBatch, qm):
+        logits, v, q = apply_fn(p, b.obs)
+        logp = take(log_softmax(logits), b.actions)
+        log_ratio = logp - b.logprobs
+        ratio = jnp.exp(log_ratio)
+        a = (b.advantages - b.advantages.mean()) / (b.advantages.std(ddof=1) + 1e-8)
+        pg_loss = jnp.maximum(-a * ratio, -a * jnp.clip(ratio, 1 - cfg.clip_coef, 1 + cfg.clip_coef)).mean()
+        v_clipped = b.values + jnp.clip(v - b.values, -cfg.clip_coef, cfg.clip_coef)
+        v_loss = 0.5 * jnp.maximum((v - b.returns) ** 2, (v_clipped - b.returns) ** 2).mean()
+        q_loss = q_regression_loss(q, b.actions, b.returns, qm)
+        ent = entropy(logits).mean()
+        loss = pg_loss - cfg.ent_coef * ent + cfg.vf_coef * v_loss + cfg.q_coef * q_loss
+        approx_kl = ((ratio - 1) - log_ratio).mean()
+        clipfrac = (jnp.abs(ratio - 1) > cfg.clip_coef).astype(jnp.float32).mean()
+        stats = {"pg_loss": pg_loss, "v_loss": v_loss, "q_loss": q_loss, "entropy": ent}
+        return loss, stats | {"approx_kl": approx_kl, "clipfrac": clipfrac}
+
+    grad_fn = jax.grad(loss_fn, has_aux=True)
+
+    def minibatch(carry, idx):
+        p, o = carry
+        b = jax.tree_util.tree_map(lambda x: x[idx], batch)
+        grads, stats = grad_fn(p, b, q_mask[idx])
+        updates, o = tx.update(grads, o, p)
+        return (optax.apply_updates(p, updates), o), stats
+
+    def epoch(carry, k):
+        perm = jax.random.permutation(k, n)[: n_mb * mb].reshape(n_mb, mb)
+        return jax.lax.scan(minibatch, carry, perm)
+
+    (params, opt_state), stats = jax.lax.scan(epoch, (params, opt_state), jax.random.split(k_perm, cfg.update_epochs))
+    out = {f"ppo/{k}": v.mean() for k, v in stats.items()}
+    var_y = batch.returns.var()
+    out["ppo/explained_variance"] = jnp.where(
+        var_y > 0, 1 - (batch.returns - batch.values).var() / jnp.where(var_y > 0, var_y, 1.0), jnp.nan
+    )
+    return params, opt_state, out

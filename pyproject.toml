@@ -5,12 +5,7 @@ description = "Targeted counterfactual dreams with fast-to-slow policy consolida
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "torch>=2.4",
     "numpy>=1.26",
-    "crafter==1.8.3",
-    "numba>=0.60",  # JIT for opensimplex: Crafter world generation drops from ~0.5 s per reset
-    "minigrid>=2.3",
-    "gymnasium>=1.0",
     "tyro>=0.8",
     "wandb>=0.17",
     "rliable>=1.0",
@@ -54,18 +49,6 @@ ban-relative-imports = "all"
 
 [tool.pyright]
 include = ["dreaming", "tests", "analysis"]
-exclude = [
-    "dreaming/agent",
-    "dreaming/envs/base.py",
-    "dreaming/envs/crafter_env.py",
-    "dreaming/envs/minigrid_env.py",
-    "dreaming/envs/pool.py",
-    "dreaming/phases",
-    "dreaming/train.py",
-    "tests/test_dream.py",
-    "tests/test_pool.py",
-    "tests/test_restore.py",
-]
 extraPaths = ["analysis"]
 typeCheckingMode = "basic"
 pythonVersion = "3.12"
@@ -76,10 +59,11 @@ venv = ".venv"
 root_package = "dreaming"
 
 [[tool.importlinter.contracts]]
-name = "train > phases > agent | envs > config"
+name = "train > state > phases > agent | envs > config"
 type = "layers"
 layers = [
     "dreaming.train",
+    "dreaming.state",
     "dreaming.phases",
     "dreaming.agent | dreaming.envs",
     "dreaming.config",

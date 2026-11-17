@@ -3,36 +3,20 @@
 from __future__ import annotations
 
 import dataclasses
-import os
 from dataclasses import dataclass, field
 from typing import Literal
 
-Method = Literal[
-    "ppo",  # plain PPO, no cycles
-    "no_dream",  # wake -> distil -> gate -> reset (most important baseline)
-    "random_dream",  # uniform-random rare actions
-    "go_explore",  # snapshot selection by visit counts instead of TD error
-    "full",  # targeted dreams (the method)
-    "surprisal_only",  # rarity ablation: -log pi_f only
-    "kl_only",  # rarity ablation: KL(pi_f || pi_s) only
-    "no_gate",  # ablation: always accept
-    "no_bonus",  # ablation: eta = 0
-]
-
-
-def _default_num_envs() -> int:
-    return int(os.environ.get("SLURM_CPUS_PER_TASK", 8))
+Method = Literal["ppo"]
+"""Methods ported to Craftax so far: `ppo` (plain PPO, no cycles)."""
 
 
 @dataclass
 class EnvConfig:
-    name: str = "minigrid:MiniGrid-DoorKey-8x8-v0"
-    """`crafter` or `minigrid:<gym id>`."""
-    num_envs: int = field(default_factory=_default_num_envs)
-    """Number of parallel environments (one worker process each in `process` mode)."""
-    pool_mode: Literal["process", "serial"] = "process"
+    name: Literal["Craftax-Classic-Symbolic-v1"] = "Craftax-Classic-Symbolic-v1"
+    num_envs: int = 64
+    """Parallel envs, vmapped on one device."""
     max_episode_steps: int | None = None
-    """Episode cap; `None` uses the env default (Crafter 10000, MiniGrid native)."""
+    """Episode cap (`EnvParams.max_timesteps`); `None` keeps the Craftax default of 10000."""
 
 
 @dataclass
@@ -116,7 +100,7 @@ class GateConfig:
 
 @dataclass
 class Config:
-    method: Method = "full"
+    method: Method = "ppo"
     seed: int = 0
     total_wake_steps: int = 1_000_000
     """Env-step budget, counted on `budget_axis`."""
@@ -136,9 +120,10 @@ class Config:
     reset_fast: bool = True
     """pi_f := pi_s at the end of every cycle. `False` (consolidation ablation) lets the fast learner keep
     its own weights; the slow policy is then only a gated, distilled copy that never acts."""
-    device: str = "auto"
+    device: Literal["auto", "gpu", "cpu"] = "auto"
+    """`gpu` fails fast when JAX sees no GPU."""
     amp: bool = True
-    """bf16 autocast on CUDA."""
+    """bf16 matmuls on GPU."""
     track: bool = False
     """Log to wandb (CSV is always written)."""
     wandb_project: str = "dreaming"
@@ -154,26 +139,8 @@ class Config:
 
 def apply_method(cfg: Config) -> Config:
     """Translate `cfg.method` into component flags. Returns a modified copy."""
-    cfg = dataclasses.replace(
-        cfg,
-        dream=dataclasses.replace(cfg.dream),
-        gate=dataclasses.replace(cfg.gate),
-    )
-    m = cfg.method
-    if m in ("ppo", "no_dream"):
+    cfg = dataclasses.replace(cfg, dream=dataclasses.replace(cfg.dream), gate=dataclasses.replace(cfg.gate))
+    if cfg.method == "ppo":
         cfg.dream.enabled = False
-    if m == "random_dream":
-        cfg.dream.selection = "random"
-    elif m == "go_explore":
-        cfg.dream.selection = "go_explore"
-    elif m == "surprisal_only":
-        cfg.dream.rarity = "surprisal"
-    elif m == "kl_only":
-        cfg.dream.rarity = "kl"
-    elif m == "no_gate":
-        cfg.gate.enabled = False
-    elif m == "no_bonus":
-        cfg.dream.eta = 0.0
-    if m == "ppo":
         cfg.gate.enabled = False
     return cfg
