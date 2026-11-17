@@ -148,9 +148,9 @@ def test_opt_reset_modes(tmp_path, mode):
     df = pd.read_csv(tmp_path / "o" / "progress.csv")
     c = df[df["opt/reset"].notna()]
     assert len(c) >= 3
-    acc = c["gate/accepted"].to_numpy()
+    acc = np.asarray(c["gate/accepted"])
     expected = {"never": 0.0 * acc, "always": 0.0 * acc + 1.0, "on_reject": 1.0 - acc}[mode]
-    assert (c["opt/reset"].to_numpy() == expected).all()
+    assert (np.asarray(c["opt/reset"]) == expected).all()
 
 
 @pytest.mark.parametrize("reset_fast", [True, False])

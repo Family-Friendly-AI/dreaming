@@ -15,7 +15,14 @@ dependencies = [
     "wandb>=0.17",
     "rliable>=1.0",
     "pandas>=2.0,<3",  # rliable -> arch 7.2 breaks with pandas 3 (deprecate_kwarg signature)
+]
+
+[dependency-groups]
+dev = [
     "pytest>=8.0",
+    "ruff>=0.8",
+    "pyright>=1.1.390",
+    "import-linter>=2.1",
 ]
 
 [build-system]
@@ -28,3 +35,44 @@ packages = ["dreaming"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = ["docs/brief", "runs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "TID"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.pyright]
+include = ["dreaming", "tests", "analysis"]
+exclude = [
+    "dreaming/agent",
+    "dreaming/envs",
+    "dreaming/phases",
+    "dreaming/train.py",
+    "tests/test_dream.py",
+    "tests/test_pool.py",
+    "tests/test_restore.py",
+]
+extraPaths = ["analysis"]
+typeCheckingMode = "basic"
+pythonVersion = "3.12"
+venvPath = "."
+venv = ".venv"
+
+[tool.importlinter]
+root_package = "dreaming"
+
+[[tool.importlinter.contracts]]
+name = "train > phases > agent | envs > config"
+type = "layers"
+layers = [
+    "dreaming.train",
+    "dreaming.phases",
+    "dreaming.agent | dreaming.envs",
+    "dreaming.config",
+]

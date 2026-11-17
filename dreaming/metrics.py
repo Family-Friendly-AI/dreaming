@@ -51,7 +51,7 @@ class EpisodeTracker:
         return {a: 100.0 * self.ach_counts.get(a, 0) / n for a in names}
 
     def summary(self, prefix: str = "train") -> dict:
-        out = {f"{prefix}/episodes": self.n_episodes}
+        out: dict[str, float] = {f"{prefix}/episodes": self.n_episodes}
         if self.returns:
             out[f"{prefix}/return"] = float(np.mean(self.returns))
             out[f"{prefix}/length"] = float(np.mean(self.lengths))

@@ -93,7 +93,7 @@ def compare(runs: dict[str, list[dict]]) -> tuple[pd.DataFrame, pd.DataFrame]:
                      "return_std": rets.std() if rets.size else np.nan, "n_seeds": len(ss)})
         ach[m] = rates.mean(0).tolist()
     table = pd.DataFrame(rows).sort_values("score", ascending=False).reset_index(drop=True)
-    success = pd.DataFrame(ach, index=ACH_ORDER)
+    success = pd.DataFrame(ach, index=pd.Index(ACH_ORDER))
     # Score of the seed-averaged rates; >= the paper's score (mean of per-seed scores, Jensen).
     success.loc["score_of_mean_rates"] = [crafter_score(success[c].iloc[:22]) for c in success.columns]
     return table, success

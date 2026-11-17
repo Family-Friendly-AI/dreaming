@@ -40,7 +40,7 @@ def load_runs(root: str, metric: str) -> dict[str, list[pd.DataFrame]]:
 
 def on_grid(dfs: list[pd.DataFrame], x: str, metric: str, n_points: int) -> tuple[np.ndarray, np.ndarray]:
     """Interpolate every seed onto a shared grid up to the shortest run; returns (grid, [seeds, points])."""
-    curves = [df[[x, metric]].dropna().sort_values(x) for df in dfs]
+    curves = [df.loc[:, [x, metric]].dropna().sort_values(by=x) for df in dfs]
     curves = [c for c in curves if len(c)]
     x_max = min(c[x].iloc[-1] for c in curves)
     grid = np.linspace(0, x_max, n_points)
