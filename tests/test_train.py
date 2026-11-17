@@ -21,7 +21,7 @@ def tiny(tmp_path, method, **kw) -> Config:
     )
     cfg = dataclasses.replace(cfg, **kw)
     cfg.ppo.num_steps = 16
-    cfg.gate.n_seeds, cfg.gate.max_steps = 4, 20
+    cfg.dream.horizon, cfg.dream.update_epochs, cfg.dream.buffer_size = 8, 1, 64
     return cfg
 
 
@@ -32,6 +32,7 @@ def test_total_budget_stops_training(tmp_path, method):
     assert s["steps/total"] == s["steps/wake"] + s["steps/dream"] + s["steps/gate"]
     assert 2048 <= s["steps/total"] < 2048 + per_iter + s["steps/dream"] + s["steps/gate"]
     assert s["budget_axis"] == "total"
+    assert (s["steps/dream"] > 0) == (method != "ppo")
     assert s["final/episodes"] > 0
     cfg = json.loads((tmp_path / method / "config.json").read_text())
     assert "git_sha" in cfg

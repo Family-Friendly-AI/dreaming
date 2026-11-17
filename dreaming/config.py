@@ -6,8 +6,9 @@ import dataclasses
 from dataclasses import dataclass, field
 from typing import Literal
 
-Method = Literal["ppo"]
-"""Methods ported to Craftax so far: `ppo` (plain PPO, no cycles)."""
+Method = Literal["ppo", "dream", "random_dream"]
+"""Methods ported to Craftax so far: `ppo` (wake only); `dream` / `random_dream` (wake -> dream on pi_f each cycle,
+targeted or random branches). Consolidation, gate and reset are not ported yet, so no method uses them."""
 
 
 @dataclass
@@ -38,11 +39,10 @@ class PPOConfig:
 
 @dataclass
 class DreamConfig:
-    enabled: bool = True
-    selection: Literal["targeted", "random", "go_explore"] = "targeted"
+    selection: Literal["targeted", "random"] = "targeted"
     rarity: Literal["both", "surprisal", "kl"] = "both"
     budget_frac: float = 0.3
-    """Dream env steps as a fraction of the cycle's wake env steps."""
+    """Dream env steps per cycle as a fraction of `wake_steps_per_cycle` (fixed per run: one compiled shape)."""
     k_max: int = 3
     """Rare action is repeated k ~ U{1..k_max} times."""
     horizon: int = 64
@@ -62,25 +62,13 @@ class DreamConfig:
     lr: float = 2.5e-4
     buffer_size: int = 2000
     snapshot_prob: float = 0.05
-    """Per env-step probability of capturing a snapshot candidate during wake."""
+    """Fraction of envs captured as snapshot candidates per wake step (ceil(snapshot_prob * num_envs) slots)."""
     max_snapshots: int | None = None
     """Optional hard cap on snapshots dreamed per cycle."""
 
 
 @dataclass
-class ConsolidateConfig:
-    distil_epochs: int = 4
-    beta_tr: float = 0.5
-    lr: float = 2.5e-4
-    minibatch_size: int = 512
-    obs_buffer: int = 16384
-    """Reservoir of the cycle's wake + dream observations used for distillation."""
-    value_coef: float = 0.5
-
-
-@dataclass
 class GateConfig:
-    enabled: bool = True
     n_seeds: int = 0
     """Held-out seeds; 0 means env default (Crafter 32, MiniGrid 50)."""
     max_steps: int = 1000
@@ -111,15 +99,7 @@ class Config:
     env: EnvConfig = field(default_factory=EnvConfig)
     ppo: PPOConfig = field(default_factory=PPOConfig)
     dream: DreamConfig = field(default_factory=DreamConfig)
-    consolidate: ConsolidateConfig = field(default_factory=ConsolidateConfig)
-    gate: GateConfig = field(default_factory=GateConfig)
     n_q_heads: int = 5
-    opt_reset: Literal["never", "on_reject", "always"] = "never"
-    """When the fast learner's Adam state (wake and dream optimizers) is reset at the end of a cycle.
-    `always` is the original behaviour; `never` keeps the moment estimates across pi_f := pi_s."""
-    reset_fast: bool = True
-    """pi_f := pi_s at the end of every cycle. `False` (consolidation ablation) lets the fast learner keep
-    its own weights; the slow policy is then only a gated, distilled copy that never acts."""
     device: Literal["auto", "gpu", "cpu"] = "auto"
     """`gpu` fails fast when JAX sees no GPU."""
     amp: bool = True
@@ -133,14 +113,13 @@ class Config:
     """Log every n PPO iterations."""
 
     @property
-    def cycles_enabled(self) -> bool:
+    def dreams(self) -> bool:
         return self.method != "ppo"
 
 
 def apply_method(cfg: Config) -> Config:
-    """Translate `cfg.method` into component flags. Returns a modified copy."""
-    cfg = dataclasses.replace(cfg, dream=dataclasses.replace(cfg.dream), gate=dataclasses.replace(cfg.gate))
-    if cfg.method == "ppo":
-        cfg.dream.enabled = False
-        cfg.gate.enabled = False
+    """Translate `cfg.method` into component settings. Returns a modified copy."""
+    cfg = dataclasses.replace(cfg, dream=dataclasses.replace(cfg.dream))
+    if cfg.method == "random_dream":
+        cfg.dream.selection = "random"
     return cfg

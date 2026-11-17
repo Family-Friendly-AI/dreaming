@@ -8,6 +8,8 @@ import optax
 from jax import Array
 
 from dreaming.agent.networks import Params
+from dreaming.phases.dream import DreamPhase
+from dreaming.phases.snapshots import SnapshotBuffer
 from dreaming.phases.wake import WakeState
 
 
@@ -28,9 +30,22 @@ class StepCounters:
 
 
 @dataclass
+class Dreams:
+    """Dream-only state; `ref` is pi_f at the start of the cycle (reference policy of the KL rarity term)."""
+
+    phase: DreamPhase
+    ref: Params
+    opt: optax.OptState
+    buffer: SnapshotBuffer
+    key: Array
+
+
+@dataclass
 class TrainState:
     fast: Params
     opt: optax.OptState
     wake: WakeState
     key: Array
     counters: StepCounters
+    dreams: Dreams | None
+    """`None` for `ppo`."""

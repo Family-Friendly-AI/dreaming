@@ -1,6 +1,6 @@
-"""Entry point: `python -m dreaming.train --method ppo ...` on Craftax-Classic-Symbolic.
+"""Entry point: `python -m dreaming.train --method ppo|dream|random_dream ...` on Craftax-Classic-Symbolic.
 
-Cycle: wake -> dream -> consolidate -> gate -> reset (method `ppo` runs wake only).
+Cycle: wake (PPO, snapshot capture) -> dream (update pi_f from paired branches). `ppo` runs wake only.
 """
 
 from __future__ import annotations
@@ -19,8 +19,10 @@ from dreaming.agent.ppo import make_optimizer
 from dreaming.config import Config, apply_method
 from dreaming.envs import craftax as E
 from dreaming.metrics import EpisodeTracker, RunLogger
+from dreaming.phases import snapshots
+from dreaming.phases.dream import make_dream_phase
 from dreaming.phases.wake import Episodes, init_wake, make_wake_iteration
-from dreaming.state import StepCounters, TrainState
+from dreaming.state import Dreams, StepCounters, TrainState
 
 
 def resolve_device(name: str):
@@ -75,13 +77,19 @@ def _train(cfg: Config, platform: str) -> dict:
     fast = init_params(net, E.stream(root, E.KeyStream.INIT), E.OBS_DIM)
     wake_key = E.stream(root, E.KeyStream.WAKE)
     k_env, wake_key = jax.random.split(wake_key)
-    ts = TrainState(
-        fast=fast,
-        opt=tx.init(fast),
-        wake=init_wake(k_env, cfg.env.num_envs, env_params),
-        key=wake_key,
-        counters=StepCounters(),
-    )
+    wake = init_wake(k_env, cfg.env.num_envs, env_params)
+    dreams = None
+    if cfg.dreams:
+        dream_tx = make_optimizer(cfg.dream.lr, cfg.ppo.max_grad_norm)
+        template = jax.tree_util.tree_map(lambda x: x[0], wake.env.state)
+        dreams = Dreams(
+            phase=make_dream_phase(cfg, apply_fn(net), dream_tx, env_params),
+            ref=fast,
+            opt=dream_tx.init(fast),
+            buffer=snapshots.empty(template, E.OBS_DIM, cfg.dream.buffer_size),
+            key=E.stream(root, E.KeyStream.DREAM),
+        )
+    ts = TrainState(fast=fast, opt=tx.init(fast), wake=wake, key=wake_key, counters=StepCounters(), dreams=dreams)
     wake_iteration = make_wake_iteration(cfg, apply_fn(net), tx, env_params)
     tracker = EpisodeTracker(list(E.ACHIEVEMENTS))
     steps_per_iter = cfg.ppo.num_steps * cfg.env.num_envs
@@ -95,9 +103,14 @@ def _train(cfg: Config, platform: str) -> dict:
     cycle = 0
     while used() < cfg.total_wake_steps and (cfg.budget_axis == "total" or cycle < n_cycles):
         cycle_start = ts.counters.wake
+        if ts.dreams is not None:
+            ts.dreams.ref = ts.fast
         while ts.counters.wake - cycle_start < cfg.wake_steps_per_cycle and used() < cfg.total_wake_steps:
             ts.key, k = jax.random.split(ts.key)
-            ts.fast, ts.opt, ts.wake, out = wake_iteration(ts.fast, ts.opt, ts.wake, k)
+            buffer = None if ts.dreams is None else ts.dreams.buffer
+            ts.fast, ts.opt, ts.wake, buffer, out = wake_iteration(ts.fast, ts.opt, ts.wake, buffer, k)
+            if ts.dreams is not None and buffer is not None:
+                ts.dreams.buffer = buffer
             ts.counters.wake += steps_per_iter
             tracker.add(episode_records(out.episodes), ts.counters.wake)
             it += 1
@@ -110,6 +123,12 @@ def _train(cfg: Config, platform: str) -> dict:
                     "sps": ts.counters.total / (time.time() - t0),
                 }
                 logger.log(row)
+        if ts.dreams is not None:
+            d = ts.dreams
+            d.key, k = jax.random.split(d.key)
+            ts.fast, d.opt, stats, n_steps = d.phase(ts.fast, d.ref, d.opt, d.buffer, k)
+            ts.counters.dream += int(n_steps)
+            logger.log({**ts.counters.row(), **{k: float(v) for k, v in stats.items()}, "cycle": cycle})
         print(
             f"[cycle {cycle + 1}] {ts.counters.row()} "
             f"return={tracker.summary().get('train/return', float('nan')):.3f} "
