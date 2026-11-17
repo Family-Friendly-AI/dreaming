@@ -1,0 +1,9 @@
+runs
+runs.log
+send.sh
+.envrc
+.config
+.venv
+.pytest_cache
+__pycache__
+.DS_Store
