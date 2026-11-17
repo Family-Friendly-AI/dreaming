@@ -1,0 +1,30 @@
+[project]
+name = "dreaming"
+version = "0.1.0"
+description = "Targeted counterfactual dreams with fast-to-slow policy consolidation"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "torch>=2.4",
+    "numpy>=1.26",
+    "crafter==1.8.3",
+    "numba>=0.60",  # JIT for opensimplex: Crafter world generation drops from ~0.5 s per reset
+    "minigrid>=2.3",
+    "gymnasium>=1.0",
+    "tyro>=0.8",
+    "wandb>=0.17",
+    "rliable>=1.0",
+    "pandas>=2.0,<3",  # rliable -> arch 7.2 breaks with pandas 3 (deprecate_kwarg signature)
+    "pytest>=8.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["dreaming"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
