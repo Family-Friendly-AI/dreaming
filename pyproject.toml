@@ -15,6 +15,11 @@ dependencies = [
     "wandb>=0.17",
     "rliable>=1.0",
     "pandas>=2.0,<3",  # rliable -> arch 7.2 breaks with pandas 3 (deprecate_kwarg signature)
+    "jax>=0.4.30",
+    "jax[cuda12]>=0.4.30 ; sys_platform == 'linux'",
+    "flax>=0.8",
+    "optax>=0.2",
+    "craftax==1.7.0",
 ]
 
 [dependency-groups]
@@ -51,7 +56,10 @@ ban-relative-imports = "all"
 include = ["dreaming", "tests", "analysis"]
 exclude = [
     "dreaming/agent",
-    "dreaming/envs",
+    "dreaming/envs/base.py",
+    "dreaming/envs/crafter_env.py",
+    "dreaming/envs/minigrid_env.py",
+    "dreaming/envs/pool.py",
     "dreaming/phases",
     "dreaming/train.py",
     "tests/test_dream.py",
