@@ -7,13 +7,15 @@ replays a trajectory exactly; a snapshot is just a stored `EnvState`.
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Callable
 from enum import IntEnum
 
 import jax
 import jax.numpy as jnp
-from craftax.craftax_classic.constants import Achievement
+from craftax.craftax_classic.constants import BLOCK_PIXEL_SIZE_IMG, Achievement
 from craftax.craftax_classic.envs.craftax_state import EnvParams, EnvState
 from craftax.craftax_classic.envs.craftax_symbolic_env import CraftaxClassicSymbolicEnvNoAutoReset
+from craftax.craftax_classic.renderer import make_craftax_pixel_renderer
 from flax import struct
 from jax import Array
 
@@ -35,6 +37,7 @@ class KeyStream(IntEnum):
     DREAM = 2
     GATE_WORLD = 3
     GATE_NOISE = 4
+    VIDEO = 5
 
 
 def stream(root: Array, s: KeyStream) -> Array:
@@ -83,6 +86,12 @@ def visit_key(state: EnvState) -> Array:
     digits = jnp.minimum(inv, _INV_LEVELS - 1).astype(jnp.int32)
     code = jnp.sum(digits * _INV_LEVELS ** jnp.arange(digits.shape[-1], dtype=jnp.int32), axis=-1)
     return cell * jnp.int32(_INV_LEVELS ** digits.shape[-1]) + code
+
+
+def pixel_renderer() -> Callable[[EnvState], Array]:
+    """Unbatched state -> uint8 [144, 144, 3] frame. Loads the Craftax textures (~30 s once, then cached)."""
+    render = make_craftax_pixel_renderer(BLOCK_PIXEL_SIZE_IMG)
+    return lambda state: jnp.clip(render(state), 0, 255).astype(jnp.uint8)
 
 
 def restore(states: EnvState) -> EnvCarry:

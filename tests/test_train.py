@@ -2,6 +2,7 @@ import dataclasses
 import json
 from typing import get_args
 
+import imageio.v3 as iio
 import pytest
 
 from dreaming.config import Config, EnvConfig, Method
@@ -42,6 +43,15 @@ def test_same_seed_same_metrics(tmp_path):
     a = train(tiny(tmp_path / "a", "ppo"))
     b = train(tiny(tmp_path / "b", "ppo"))
     assert a["final/return"] == b["final/return"] and a["final/episodes"] == b["final/episodes"]
+
+
+def test_one_video_per_n_steps_leaves_training_unchanged(tmp_path):
+    plain = train(tiny(tmp_path / "a", "ppo"))
+    filmed = train(tiny(tmp_path / "b", "ppo", video_every=1000, video_steps=16))
+    gifs = sorted((tmp_path / "b" / "ppo" / "videos").glob("*.gif"))
+    assert [p.name for p in gifs] == ["step_000001024.gif", "step_000002048.gif"]
+    assert iio.imread(gifs[0], index=0).shape == (144, 144, 3)
+    assert filmed["final/return"] == plain["final/return"] and filmed["final/episodes"] == plain["final/episodes"]
 
 
 def test_gpu_without_gpu_names_the_fix(tmp_path):

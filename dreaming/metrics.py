@@ -115,6 +115,18 @@ class RunLogger:
         if len(self.rows) % 20 == 0:
             self.write_csv()
 
+    def log_video(self, frames: np.ndarray, step: int, fps: int = 15):
+        """Write uint8 frames [T, H, W, 3] to `videos/step_<step>.gif`; mirrored to wandb as `video` at `step`."""
+        import imageio.v3 as iio
+
+        path = os.path.join(self.run_dir, "videos", f"step_{step:09d}.gif")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        iio.imwrite(path, frames, extension=".gif", duration=1000 / fps, loop=0)
+        if self.wandb is not None:
+            import wandb
+
+            self.wandb.log({"video": wandb.Video(path, format="gif")}, step=step)
+
     def write_csv(self):
         import pandas as pd
 

@@ -7,8 +7,6 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 Method = Literal["ppo", "dream", "random_dream"]
-"""Methods ported to Craftax so far: `ppo` (wake only); `dream` / `random_dream` (wake -> dream on pi_f each cycle,
-targeted or random branches). Consolidation, gate and reset are not ported yet, so no method uses them."""
 
 
 @dataclass
@@ -111,6 +109,11 @@ class Config:
     run_name: str | None = None
     log_every: int = 1
     """Log every n PPO iterations."""
+    video_every: int = 0
+    """Record one pi_f episode as `videos/step_<steps/total>.gif` (wandb `video`) each time `steps/total` passes a
+    multiple of n; 0 disables."""
+    video_steps: int = 1000
+    """Frame cap per video (fixed rollout length: one compiled shape)."""
 
     @property
     def dreams(self) -> bool:

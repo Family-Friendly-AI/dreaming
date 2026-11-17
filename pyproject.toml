@@ -57,6 +57,12 @@ ban-relative-imports = "all"
 "jax.experimental.io_callback".msg = "No host callbacks inside jitted phases: return arrays and log in the Python loop."
 "jax.pure_callback".msg = "No host callbacks inside jitted phases: return arrays and log in the Python loop."
 "jax.debug.callback".msg = "No host callbacks inside jitted phases: return arrays and log in the Python loop."
+"craftax.craftax_classic.renderer".msg = "Render with dreaming.envs.craftax.pixel_renderer (uint8 frames; textures load once)."
+"wandb.Video".msg = "Log videos with RunLogger.log_video (writes a GIF; wandb.Video on arrays needs moviepy)."
+
+[tool.ruff.lint.per-file-ignores]
+"dreaming/envs/craftax.py" = ["TID251"]
+"dreaming/metrics.py" = ["TID251"]
 
 [tool.pyright]
 include = ["dreaming", "tests", "analysis"]

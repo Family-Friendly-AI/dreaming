@@ -4,6 +4,7 @@
 # BUDGET_AXIS (total: wake + dream + gate steps count toward STEPS; set to `wake` for the wake-only budget).
 # Dreams (ignored by ppo): DREAM_FRAC (2.0: dream env steps per cycle / CYCLE), DREAM_M (16 branch/control pairs
 # per snapshot), DREAM_H (32 follow-pi_f steps after the deviation).
+# VIDEO_EVERY (100000: one pi_f episode GIF per this many total env steps; 0 disables).
 # TAG (optional) is appended to the run name to distinguish variants of one method.
 # Extra CLI flags are passed through to dreaming.train.
 set -euo pipefail
@@ -19,6 +20,7 @@ NUM_STEPS=${NUM_STEPS:-64}
 DREAM_FRAC=${DREAM_FRAC:-2.0}
 DREAM_M=${DREAM_M:-16}
 DREAM_H=${DREAM_H:-32}
+VIDEO_EVERY=${VIDEO_EVERY:-100000}
 TAG=${TAG:+_${TAG}}
 TRACK=""
 if [[ -n "${WANDB_API_KEY:-}" ]]; then TRACK="--track"; fi
@@ -41,6 +43,7 @@ ${PY} -m dreaming.train \
     --dream.horizon "${DREAM_H}" \
     --dream.minibatch-size 1024 \
     --log-every 5 \
+    --video-every "${VIDEO_EVERY}" \
     --run-name "craftax_${METHOD}${TAG}_s${SEED}_${SLURM_JOB_ID:-local}" \
     ${TRACK} \
     "$@"

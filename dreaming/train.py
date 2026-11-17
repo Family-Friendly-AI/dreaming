@@ -21,6 +21,7 @@ from dreaming.envs import craftax as E
 from dreaming.metrics import EpisodeTracker, RunLogger
 from dreaming.phases import snapshots
 from dreaming.phases.dream import make_dream_phase
+from dreaming.phases.video import make_video_rollout
 from dreaming.phases.wake import Episodes, init_wake, make_wake_iteration
 from dreaming.state import Dreams, StepCounters, TrainState
 
@@ -97,6 +98,18 @@ def _train(cfg: Config, platform: str) -> dict:
     def used() -> int:
         return ts.counters.total if cfg.budget_axis == "total" else ts.counters.wake
 
+    video = make_video_rollout(apply_fn(net), env_params, cfg.video_steps) if cfg.video_every > 0 else None
+    video_key = E.stream(root, E.KeyStream.VIDEO)
+    next_video = cfg.video_every
+
+    def record_video():
+        nonlocal next_video
+        if video is None or ts.counters.total < next_video:
+            return
+        frames, n = video(ts.fast, jax.random.fold_in(video_key, ts.counters.total // cfg.video_every))
+        logger.log_video(np.asarray(frames)[: int(n)], ts.counters.total)
+        next_video = (ts.counters.total // cfg.video_every + 1) * cfg.video_every
+
     t0 = time.time()
     it = 0
     n_cycles = max(1, cfg.total_wake_steps // cfg.wake_steps_per_cycle)
@@ -123,12 +136,14 @@ def _train(cfg: Config, platform: str) -> dict:
                     "sps": ts.counters.total / (time.time() - t0),
                 }
                 logger.log(row)
+            record_video()
         if ts.dreams is not None:
             d = ts.dreams
             d.key, k = jax.random.split(d.key)
             ts.fast, d.opt, stats, n_steps = d.phase(ts.fast, d.ref, d.opt, d.buffer, k)
             ts.counters.dream += int(n_steps)
             logger.log({**ts.counters.row(), **{k: float(v) for k, v in stats.items()}, "cycle": cycle})
+            record_video()
         print(
             f"[cycle {cycle + 1}] {ts.counters.row()} "
             f"return={tracker.summary().get('train/return', float('nan')):.3f} "
