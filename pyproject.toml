@@ -47,6 +47,17 @@ select = ["E", "F", "I", "B", "UP", "TID"]
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"
 
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"torch".msg = "The learner is JAX: use flax/optax via dreaming.agent."
+"crafter".msg = "The env is Craftax-Classic: use dreaming.envs.craftax."
+"minigrid".msg = "MiniGrid was removed: use a tiny Craftax config (max_episode_steps, num_envs) in tests."
+"gymnasium".msg = "Envs are pure JAX: use dreaming.envs.craftax.step/reset."
+"pickle".msg = "Snapshots are EnvState pytrees: store states in the device buffer and restore with craftax.restore."
+"multiprocessing".msg = "Envs are vmapped on device: batch with num_envs instead of worker processes."
+"jax.experimental.io_callback".msg = "No host callbacks inside jitted phases: return arrays and log in the Python loop."
+"jax.pure_callback".msg = "No host callbacks inside jitted phases: return arrays and log in the Python loop."
+"jax.debug.callback".msg = "No host callbacks inside jitted phases: return arrays and log in the Python loop."
+
 [tool.pyright]
 include = ["dreaming", "tests", "analysis"]
 extraPaths = ["analysis"]
